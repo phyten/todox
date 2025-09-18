@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/example/todox/internal/engine"
 	"github.com/example/todox/internal/util"
@@ -149,15 +148,16 @@ function render(rows){
  if(!rows||rows.length===0) return '<p>No results.</p>';
  let h='<table><thead><tr><th>TYPE</th><th>AUTHOR</th><th>EMAIL</th><th>DATE</th><th>COMMIT</th><th>LOCATION</th><th>COMMENT</th><th>MESSAGE</th></tr></thead><tbody>';
  for(const r of rows){
-	h+=`<tr>
-		<td>${esc(r.kind||'')}</td>
-		<td>${esc(r.author||'')}</td>
-		<td>${esc(r.email||'')}</td>
-		<td>${esc(r.date||'')}</td>
-		<td><code>${esc((r.commit||'').slice(0,8))}</code></td>
-		<td><code>${esc(r.file||'')}:${r.line||''}</code></td>
-		<td>${esc(r.comment||'')}</td>
-		<td>${esc(r.message||'')}</td></tr>`;
+	h+='<tr>'+
+		'<td>'+esc(r.kind||'')+'</td>'+
+		'<td>'+esc(r.author||'')+'</td>'+
+		'<td>'+esc(r.email||'')+'</td>'+
+		'<td>'+esc(r.date||'')+'</td>'+
+		'<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
+		'<td><code>'+esc(r.file||'')+':'+(r.line||'')+'</code></td>'+
+		'<td>'+esc(r.comment||'')+'</td>'+
+		'<td>'+esc(r.message||'')+'</td>'+
+		'</tr>';
  }
  h+='</tbody></table>'; return h;
 }
