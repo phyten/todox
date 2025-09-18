@@ -214,11 +214,11 @@ func gitGrep(repo, pattern string) ([]match, error) {
 }
 
 func blameSHA(ctx context.Context, repo, file string, line int, ignoreWS bool) (string, error) {
-	args := []string{"blame", "--line-porcelain", "-L", fmt.Sprintf("%d,%d", line, line), "--"}
+	args := []string{"blame"}
 	if ignoreWS {
-		args = append([]string{"blame", "-w", "--line-porcelain", "-L", fmt.Sprintf("%d,%d", line, line), "--"}[1:], args[1:]...)
+		args = append(args, "-w")
 	}
-	args = append(args, file)
+	args = append(args, "--line-porcelain", "-L", fmt.Sprintf("%d,%d", line, line), "--", file)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repo
 	out, err := cmd.Output()
