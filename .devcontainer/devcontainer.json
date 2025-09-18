@@ -1,23 +1,15 @@
 {
   "name": "todox dev",
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/go:1": { "version": "1.22" }
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.22" },
+    "ghcr.io/devcontainers/features/git:1": {}
   },
-  "postCreateCommand": "go mod tidy",
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "golang.go",
-        "ms-azuretools.vscode-docker",
-        "github.vscode-github-actions"
-      ],
-      "settings": {
-        "go.useLanguageServer": true,
-        "terminal.integrated.defaultProfile.linux": "bash"
-      }
-    }
+  // Codespaces では forwardPorts が推奨
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "todox-web", "onAutoForward": "notify" }
   },
-  "remoteUser": "vscode"
+  // 便利オプション（初回に依存解決）
+  "postCreateCommand": "go version && go mod tidy"
 }
