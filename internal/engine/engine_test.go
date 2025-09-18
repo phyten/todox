@@ -66,4 +66,11 @@ func TestBlameSHAコマンド引数(t *testing.T) {
 		}
 	})
 
+	t.Run("空白を無視する場合", func(t *testing.T) {
+		got := call(t, true)
+		want := []string{"blame", "-w", "--line-porcelain", "-L", "12,12", "--", "dummy.txt"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("引数が期待と異なります: got=%v want=%v", got, want)
+		}
+	})
 }
