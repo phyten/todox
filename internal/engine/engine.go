@@ -79,7 +79,7 @@ func Run(opts Options) (*Result, error) {
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 
-	authorRe *regexp.Regexp
+	var authorRe *regexp.Regexp
 	if opts.AuthorRegex != "" {
 		authorRe, err = regexp.Compile(opts.AuthorRegex)
 		if err != nil {
