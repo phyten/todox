@@ -1,0 +1,14 @@
+# scripts/agent-apply
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+cat > "$TMP"
+# devcontainer 内で apply（3way＋index）
+devcontainer exec --workspace-folder "$ROOT" -- git apply --3way --index -v "/workspaces/$(basename "$TMP")" 2>&1 || {
+  echo "[agent-apply] git apply failed." >&2
+  exit 1
+}
+# 変更確認
+devcontainer exec --workspace-folder "$ROOT" -- git status --short

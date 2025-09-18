@@ -1,0 +1,9 @@
+# scripts/dcrun
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if ! devcontainer exec --workspace-folder "$ROOT" -- true >/dev/null 2>&1; then
+  echo "[dcrun] devcontainer is not up. starting..." >&2
+  devcontainer up --workspace-folder "$ROOT" >/dev/null
+fi
+exec devcontainer exec --workspace-folder "$ROOT" -- "$@"
