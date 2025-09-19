@@ -1,5 +1,8 @@
 name: Release
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -14,26 +17,21 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            archive: tar.gz
           - goos: linux
             goarch: arm64
-            archive: tar.gz
           - goos: darwin
             goarch: amd64
-            archive: tar.gz
           - goos: darwin
             goarch: arm64
-            archive: tar.gz
           - goos: windows
             goarch: amd64
-            archive: zip
           - goos: windows
             goarch: arm64
-            archive: zip
     env:
       CGO_ENABLED: 0
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      VERSION: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,25 +44,27 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p dist
-          BIN_NAME="todox-${GOOS}-${GOARCH}"
+          OUT_BASE="todox-${VERSION}-${GOOS}-${GOARCH}"
           if [ "${GOOS}" = "windows" ]; then
-            BIN_NAME="${BIN_NAME}.exe"
+            OUT_FILE="${OUT_BASE}.exe"
+          else
+            OUT_FILE="${OUT_BASE}"
           fi
-          go build -o "dist/${BIN_NAME}" ./cmd/todox
+          go build -trimpath -o "dist/${OUT_FILE}" ./cmd/todox
 
       - name: Package artifact
         shell: bash
         run: |
           cd dist
-          BIN_NAME="todox-${GOOS}-${GOARCH}"
+          OUT_BASE="todox-${VERSION}-${GOOS}-${GOARCH}"
           if [ "${GOOS}" = "windows" ]; then
-            BIN_FILE="${BIN_NAME}.exe"
-            ARCHIVE_NAME="${BIN_NAME}.zip"
+            BIN_FILE="${OUT_BASE}.exe"
+            ARCHIVE_NAME="${OUT_BASE}.zip"
             zip -9 "${ARCHIVE_NAME}" "${BIN_FILE}"
             rm "${BIN_FILE}"
           else
-            BIN_FILE="${BIN_NAME}"
-            ARCHIVE_NAME="${BIN_NAME}.tar.gz"
+            BIN_FILE="${OUT_BASE}"
+            ARCHIVE_NAME="${OUT_BASE}.tar.gz"
             tar -czf "${ARCHIVE_NAME}" "${BIN_FILE}"
             rm "${BIN_FILE}"
           fi
@@ -73,7 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: todox-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/todox-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          path: dist/todox-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
 
   release:
     name: Publish release
