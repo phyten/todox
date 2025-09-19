@@ -1,0 +1,18 @@
+run:
+  timeout: 5m
+  tests: true
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+linters-settings:
+  govet:
+    shadow: true
+issues:
+  exclude-use-default: false
+  max-same-issues: 0
+  new: false
