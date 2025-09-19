@@ -20,8 +20,9 @@ AGENTS.md — devcontainer 前提で AI エージェント（Claude / codex な�
 
 * devcontainer 内で実行
 
-  * `./scripts/dcrun make build`
-  * `./scripts/dcrun ./bin/todox -h`
+  * ホスト側からコマンドを流す場合は `./scripts/dcrun ...` で devcontainer に転送
+  * すでに devcontainer のシェルにいる場合は `make build` や `./bin/todox -h` を直接実行して OK
+  * 例: `./scripts/dcrun make build`（ホスト） / `make build`（devcontainer 内）
 
 * エージェントのパッチを適用
 
@@ -34,6 +35,8 @@ AGENTS.md — devcontainer 前提で AI エージェント（Claude / codex な�
 
 * `scripts/dcrun` … 任意コマンドを **常に devcontainer 内で**実行するラッパー
   例: `./scripts/dcrun go version`, `./scripts/dcrun make build`
+
+  * devcontainer にアタッチ済みなら同じコマンドをそのまま実行可能（例: `go version`）
 
 * `scripts/agent-apply` … **Unified diff** を標準入力で受けて `git apply --3way --index` を実行
   例: `cat patch.diff | ./scripts/agent-apply`
@@ -93,7 +96,8 @@ CHECKS:
 * **フェンス（\`\`\` や \~\~\~）禁止**。必ず **マーカー方式**を使うこと
 * コマンドは **devcontainer 内実行**を前提にし、`CMD>` を付けること
 
-  * 可能なら `./scripts/dcrun ...` 形式にすること
+  * ホスト側から操作する場合は `./scripts/dcrun ...` 形式を案内する
+  * devcontainer 内での再現はそのまま（例: `make build`）で問題ないと明記しても良い
 * パッチは **最小差分**に留めること（大規模リフォーマットや不要な変更は避ける）
 * 秘密情報や外部ネットワーク設定の追加は行わないこと
 * 変更後は `make build`、必要なら `make fmt` / `make vet` をコマンドに含めること
