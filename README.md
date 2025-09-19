@@ -117,6 +117,12 @@ make build
 
 ---
 
+## Release
+
+タグを `v*` 形式で push すると GitHub Actions の `Release` ワークフローが起動し、Linux / macOS / Windows 向けのバイナリをクロスコンパイルしてリリースページに添付します。
+
+---
+
 ## ロードマップ（抜粋）
 
 * `--with-age`（AGE 列）と `--sort`, `--group-by`
