@@ -57,5 +57,12 @@ func percent(a, b int) int {
 	if b == 0 {
 		return 100
 	}
-	return int(float64(a) * 100 / float64(b))
+	p := int(float64(a) * 100 / float64(b))
+	if p < 0 {
+		return 0
+	}
+	if p > 100 {
+		return 100
+	}
+	return p
 }
