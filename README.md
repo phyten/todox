@@ -1,6 +1,8 @@
 # todox — TODO/FIXME explorer for Git repositories
 
-[![CI](https://github.com/phyten/todox/actions/workflows/ci.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/ci.yml)
+[![Lint](https://github.com/phyten/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/lint.yml)
+[![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
+[![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
 
 `todox` は、リポジトリ内の **大文字 `TODO` / `FIXME`** を検索し、  
 **誰がその行を書いたか**（最終 or 初回導入）を素早く特定できる CLI / Web ツールです。
@@ -111,7 +113,7 @@ make build
 * 初回は `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2` でバイナリを取得してください。
 * devcontainer の外から実行する場合は `./scripts/dcrun make lint` を推奨します。
 * devcontainer 内のシェルであれば `make lint` をそのまま呼んで問題ありません。
-* GitHub Actions の `CI` ワークフローでは lint/test/build を自動実行しています。
+* GitHub Actions の `Lint` / `Test` / `Build` ワークフローでそれぞれ自動実行しています。
 
 ---
 
