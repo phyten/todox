@@ -121,6 +121,11 @@ make build
 
 タグを `v*` 形式で push すると GitHub Actions の `Release` ワークフローが起動し、Linux / macOS / Windows 向けのバイナリをクロスコンパイルしてリリースページに添付します。
 
+Homebrew tap を自動更新したい場合は、事前に以下を準備してください。
+
+* `phyten/homebrew-todox` のような tap リポジトリを作成（`Formula/todox.rb` をこのワークフローが自動生成します）
+* tap リポジトリへ push 可能な PAT を発行し、`HOMEBREW_TAP_TOKEN` として Actions シークレットに登録
+
 ---
 
 ## ロードマップ（抜粋）
