@@ -102,6 +102,16 @@ make build
 
 ---
 
+## Lint
+
+`golangci-lint` を使った静的解析を `make lint` で実行できます。
+
+* 初回は `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2` でバイナリを取得してください。
+* devcontainer の外から実行する場合は `./scripts/dcrun make lint` を推奨します。
+* devcontainer 内のシェルであれば `make lint` をそのまま呼んで問題ありません。
+
+---
+
 ## ロードマップ（抜粋）
 
 * `--with-age`（AGE 列）と `--sort`, `--group-by`
