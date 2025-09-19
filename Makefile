@@ -1,6 +1,6 @@
 BIN=bin/todox
 
-.PHONY: build run serve clean fmt vet
+.PHONY: build run serve clean fmt vet lint
 
 build:
 	mkdir -p bin
@@ -17,6 +17,9 @@ fmt:
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run
 
 clean:
 	rm -rf bin

@@ -97,6 +97,7 @@ make build
 
 * `make build` … `bin/todox` を生成
 * `make serve` … Web モードで起動
+* `make lint` … `golangci-lint run`（`golangci-lint` が PATH に必要）
 * `make fmt` / `make vet` / `make clean`
 
 ---

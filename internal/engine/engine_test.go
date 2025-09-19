@@ -15,6 +15,20 @@ func TestBlameSHAコマンド引数(t *testing.T) {
 	fakeBin := t.TempDir()
 	argsDir := t.TempDir()
 
+	setEnv := func(t *testing.T, key, value string) {
+		t.Helper()
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("環境変数%sの設定に失敗しました: %v", key, err)
+		}
+	}
+
+	unsetEnv := func(t *testing.T, key string) {
+		t.Helper()
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("環境変数%sの解除に失敗しました: %v", key, err)
+		}
+	}
+
 	scriptPath := filepath.Join(fakeBin, "git")
 	script := "#!/bin/sh\n" +
 		"if [ -z \"$ENGINE_FAKE_GIT_ARGS\" ]; then\n" +
@@ -28,15 +42,15 @@ func TestBlameSHAコマンド引数(t *testing.T) {
 	}
 
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", fakeBin+string(os.PathListSeparator)+oldPath)
-	t.Cleanup(func() { os.Setenv("PATH", oldPath) })
+	setEnv(t, "PATH", fakeBin+string(os.PathListSeparator)+oldPath)
+	t.Cleanup(func() { setEnv(t, "PATH", oldPath) })
 
-	t.Cleanup(func() { os.Unsetenv("ENGINE_FAKE_GIT_ARGS") })
+	t.Cleanup(func() { unsetEnv(t, "ENGINE_FAKE_GIT_ARGS") })
 
 	call := func(t *testing.T, ignoreWS bool) []string {
 		t.Helper()
 		argsFile := filepath.Join(argsDir, "args-"+map[bool]string{false: "no", true: "ws"}[ignoreWS]+".txt")
-		os.Setenv("ENGINE_FAKE_GIT_ARGS", argsFile)
+		setEnv(t, "ENGINE_FAKE_GIT_ARGS", argsFile)
 
 		sha, err := blameSHA(ctx, repo, "dummy.txt", 12, ignoreWS)
 		if err != nil {
