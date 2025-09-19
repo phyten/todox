@@ -111,7 +111,7 @@ make build
 * 初回は `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2` でバイナリを取得してください。
 * devcontainer の外から実行する場合は `./scripts/dcrun make lint` を推奨します。
 * devcontainer 内のシェルであれば `make lint` をそのまま呼んで問題ありません。
-* GitHub Actions の `CI` ワークフローでも同じリンタを自動実行しています。
+* GitHub Actions の `CI` ワークフローでは lint/test/build を自動実行しています。
 
 ---
 
