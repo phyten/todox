@@ -60,13 +60,15 @@ jobs:
           if [ "${GOOS}" = "windows" ]; then
             BIN_FILE="${OUT_BASE}.exe"
             ARCHIVE_NAME="${OUT_BASE}.zip"
-            zip -9 "${ARCHIVE_NAME}" "${BIN_FILE}"
-            rm "${BIN_FILE}"
+            cp "${BIN_FILE}" todox.exe
+            zip -9 "${ARCHIVE_NAME}" todox.exe
+            rm todox.exe "${BIN_FILE}"
           else
             BIN_FILE="${OUT_BASE}"
             ARCHIVE_NAME="${OUT_BASE}.tar.gz"
-            tar -czf "${ARCHIVE_NAME}" "${BIN_FILE}"
-            rm "${BIN_FILE}"
+            cp "${BIN_FILE}" todox
+            tar -czf "${ARCHIVE_NAME}" todox
+            rm todox "${BIN_FILE}"
           fi
 
       - name: Upload artifact
@@ -93,3 +95,107 @@ jobs:
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  brew:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'todox-*'
+          path: dist
+          merge-multiple: true
+
+      - name: Calculate checksums
+        id: sha
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          mac_amd="dist/todox-${TAG}-darwin-amd64.tar.gz"
+          mac_arm="dist/todox-${TAG}-darwin-arm64.tar.gz"
+          linux_amd="dist/todox-${TAG}-linux-amd64.tar.gz"
+          linux_arm="dist/todox-${TAG}-linux-arm64.tar.gz"
+          echo "mac_amd64=$(shasum -a 256 "$mac_amd" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "mac_arm64=$(shasum -a 256 "$mac_arm" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(shasum -a 256 "$linux_amd" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(shasum -a 256 "$linux_arm" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: phyten/homebrew-todox
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update Formula
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ github.ref_name | substr: 1, 999 }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          MAC_AMD_SHA="${{ steps.sha.outputs.mac_amd64 }}"
+          MAC_ARM_SHA="${{ steps.sha.outputs.mac_arm64 }}"
+          LINUX_AMD_SHA="${{ steps.sha.outputs.linux_amd64 }}"
+          LINUX_ARM_SHA="${{ steps.sha.outputs.linux_arm64 }}"
+          FORMULA_DIR="tap/Formula"
+          mkdir -p "$FORMULA_DIR"
+          cat > "$FORMULA_DIR/todox.rb" <<'RUBY'
+class Todox < Formula
+  desc "TODO/FIXME explorer for Git repositories"
+  homepage "https://github.com/phyten/todox"
+  license "MIT"
+
+  version "__VERSION__"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-arm64.tar.gz"
+      sha256 "__MAC_ARM_SHA__"
+    else
+      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-amd64.tar.gz"
+      sha256 "__MAC_AMD_SHA__"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-arm64.tar.gz"
+      sha256 "__LINUX_ARM_SHA__"
+    else
+      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-amd64.tar.gz"
+      sha256 "__LINUX_AMD_SHA__"
+    end
+  end
+
+  def install
+    bin.install "todox"
+  end
+
+  test do
+    system "#{bin}/todox", "--help"
+  end
+end
+RUBY
+          sed -i "s/__VERSION__/${VERSION}/g" "$FORMULA_DIR/todox.rb"
+          sed -i "s/__TAG__/${TAG}/g" "$FORMULA_DIR/todox.rb"
+          sed -i "s/__MAC_AMD_SHA__/${MAC_AMD_SHA}/g" "$FORMULA_DIR/todox.rb"
+          sed -i "s/__MAC_ARM_SHA__/${MAC_ARM_SHA}/g" "$FORMULA_DIR/todox.rb"
+          sed -i "s/__LINUX_AMD_SHA__/${LINUX_AMD_SHA}/g" "$FORMULA_DIR/todox.rb"
+          sed -i "s/__LINUX_ARM_SHA__/${LINUX_ARM_SHA}/g" "$FORMULA_DIR/todox.rb"
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add Formula/todox.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          git commit -m "todox ${GITHUB_REF_NAME}"
+          git push
