@@ -233,6 +233,9 @@ func printTSV(res *engine.Result, _ engine.Options) {
 		} else if res.HasMessage {
 			base = append(base, it.Message)
 		}
+		for i := range base {
+			base[i] = sanitizeTSVField(base[i])
+		}
 		fmt.Fprintln(w, strings.Join(base, "\t"))
 	}
 	_ = w.Flush()
@@ -268,6 +271,14 @@ func short(s string) string {
 	if len(s) >= 8 {
 		return s[:8]
 	}
+	return s
+}
+
+func sanitizeTSVField(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
 	return s
 }
 
