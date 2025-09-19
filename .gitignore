@@ -1,1 +1,11 @@
 /bin
+# Go ビルドキャッシュ
+/.cache/
+
+# テストレポート・カバレッジ
+/coverage.out
+/*.coverprofile
+
+# ログ・一時ファイル
+*.log
+*.tmp
