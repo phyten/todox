@@ -1,5 +1,7 @@
 # todox — TODO/FIXME explorer for Git repositories
 
+[![CI](https://github.com/phyten/todox/actions/workflows/ci.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/ci.yml)
+
 `todox` は、リポジトリ内の **大文字 `TODO` / `FIXME`** を検索し、  
 **誰がその行を書いたか**（最終 or 初回導入）を素早く特定できる CLI / Web ツールです。
 
