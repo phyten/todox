@@ -96,11 +96,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  precheck:
+    name: Check tap token
+    runs-on: ubuntu-latest
+    outputs:
+      has_token: ${{ steps.eval.outputs.has_token }}
+    steps:
+      - id: eval
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
   brew:
     name: Update Homebrew tap
-    needs: release
+    needs:
+      - release
+      - precheck
     runs-on: ubuntu-latest
-    if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+    if: ${{ needs.precheck.outputs.has_token == 'true' }}
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
