@@ -131,9 +131,6 @@ jobs:
           path: tap
 
       - name: Update Formula
-        env:
-          TAG: ${{ github.ref_name }}
-          VERSION: ${{ github.ref_name | substr: 1, 999 }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
