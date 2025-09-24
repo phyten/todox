@@ -22,6 +22,14 @@
 
 ## Quick start
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap phyten/todox
+brew install todox
+# または: brew install phyten/todox/todox
+```
+
 ### 依存
 - `git`（内部で CLI を呼び出します）
 - Go 1.22 以降（ソースからビルドする場合）
