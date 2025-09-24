@@ -140,43 +140,43 @@ jobs:
           LINUX_ARM_SHA="${{ steps.sha.outputs.linux_arm64 }}"
           FORMULA_DIR="tap/Formula"
           mkdir -p "$FORMULA_DIR"
-          cat > "$FORMULA_DIR/todox.rb" <<'RUBY'
-class Todox < Formula
-  desc "TODO/FIXME explorer for Git repositories"
-  homepage "https://github.com/phyten/todox"
-  license "MIT"
-
-  version "__VERSION__"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-arm64.tar.gz"
-      sha256 "__MAC_ARM_SHA__"
-    else
-      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-amd64.tar.gz"
-      sha256 "__MAC_AMD_SHA__"
-    end
-  end
-
-  on_linux do
-    if Hardware::CPU.arm?
-      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-arm64.tar.gz"
-      sha256 "__LINUX_ARM_SHA__"
-    else
-      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-amd64.tar.gz"
-      sha256 "__LINUX_AMD_SHA__"
-    end
-  end
-
-  def install
-    bin.install "todox"
-  end
-
-  test do
-    system "#{bin}/todox", "--help"
-  end
-end
-RUBY
+          printf '%s\n' \
+            'class Todox < Formula' \
+            '  desc "TODO/FIXME explorer for Git repositories"' \
+            '  homepage "https://github.com/phyten/todox"' \
+            '  license "MIT"' \
+            '' \
+            '  version "__VERSION__"' \
+            '' \
+            '  on_macos do' \
+            '    if Hardware::CPU.arm?' \
+            '      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-arm64.tar.gz"' \
+            '      sha256 "__MAC_ARM_SHA__"' \
+            '    else' \
+            '      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-darwin-amd64.tar.gz"' \
+            '      sha256 "__MAC_AMD_SHA__"' \
+            '    end' \
+            '  end' \
+            '' \
+            '  on_linux do' \
+            '    if Hardware::CPU.arm?' \
+            '      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-arm64.tar.gz"' \
+            '      sha256 "__LINUX_ARM_SHA__"' \
+            '    else' \
+            '      url "https://github.com/phyten/todox/releases/download/__TAG__/todox-__TAG__-linux-amd64.tar.gz"' \
+            '      sha256 "__LINUX_AMD_SHA__"' \
+            '    end' \
+            '  end' \
+            '' \
+            '  def install' \
+            '    bin.install "todox"' \
+            '  end' \
+            '' \
+            '  test do' \
+            '    system "#{bin}/todox", "--help"' \
+            '  end' \
+            'end' \
+            > "$FORMULA_DIR/todox.rb"
           sed -i "s/__VERSION__/${VERSION}/g" "$FORMULA_DIR/todox.rb"
           sed -i "s/__TAG__/${TAG}/g" "$FORMULA_DIR/todox.rb"
           sed -i "s/__MAC_AMD_SHA__/${MAC_AMD_SHA}/g" "$FORMULA_DIR/todox.rb"
