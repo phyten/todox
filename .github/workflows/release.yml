@@ -100,7 +100,9 @@ jobs:
     name: Update Homebrew tap
     needs: release
     runs-on: ubuntu-latest
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -127,7 +129,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: phyten/homebrew-todox
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ env.HOMEBREW_TAP_TOKEN }}
           path: tap
 
       - name: Update Formula
