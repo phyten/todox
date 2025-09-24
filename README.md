@@ -4,19 +4,21 @@
 [![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
 [![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
 
-`todox` は、リポジトリ内の **大文字 `TODO` / `FIXME`** を検索し、  
-**誰がその行を書いたか**（最終 or 初回導入）を素早く特定できる CLI / Web ツールです。
+`todox` scans your repository for uppercase **`TODO` / `FIXME`** markers and helps you
+identify **who introduced or last touched** those lines in seconds—either from the CLI or a lightweight web UI.
 
-- `--mode last`（既定）：その行を**最後に変更**した人（`git blame`）
-- `--mode first`：その `TODO/FIXME` を**最初に導入**した人（`git log -L`）
-- フィルタ：`--author`, `--type {todo|fixme|both}`
-- 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名1行目）、`--full`
-- 文字数制御：`--truncate`, `--truncate-comment`, `--truncate-message`
-- 出力：`table` / `tsv` / `json`
-- 進捗表示：TTY 時のみ stderr で 1 行上書き（`--no-progress` あり）
-- Web：`todox serve` で簡易 UI と JSON API
+- `--mode last` (default): show the **most recent author** of the line (`git blame`).
+- `--mode first`: show the **original author** who introduced the TODO/FIXME (`git log -L`).
+- Filtering options: `--author`, `--type {todo|fixme|both}`.
+- Extra columns: `--with-comment`, `--with-message`, `--full` (shortcut for both with truncation).
+- Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
+- Output formats: `table`, `tsv`, `json`.
+- Progress bar: one-line TTY updates (disable with `--no-progress`).
+- Web mode: `todox serve` exposes a minimal UI plus a JSON API.
 
-> 実装の詳細や AI と協働する運用は [`AGENTS.md`](./AGENTS.md) を参照。
+> For automation rules and AI collaboration guidelines, see [`AGENTS.md`](./AGENTS.md).
+>
+> 日本語ドキュメントは [README-ja.md](./README-ja.md) を参照してください。
 
 ---
 
@@ -27,49 +29,51 @@
 ```bash
 brew tap phyten/todox
 brew install todox
-# または: brew install phyten/todox/todox
+# or: brew install phyten/todox/todox
 ```
 
-### 依存
-- `git`（内部で CLI を呼び出します）
-- Go 1.22 以降（ソースからビルドする場合）
+### Prerequisites
 
-### ビルド & 実行（ローカル）
+- `git` (the tool shells out to the Git CLI)
+- Go 1.22 or newer (when building from source)
+
+### Local build & run
+
 ```bash
 go mod tidy
 make build
 ./bin/todox -h
 ```
 
-### 例
+### Examples
 
 ```bash
-# すべての TODO/FIXME の最終変更者（表形式）
+# List TODO/FIXME items with the most recent author (table output)
 ./bin/todox
 
-# FIXME だけ、初回導入者、行本文＋件名を 80 文字にトリム
+# Focus on FIXMEs, show the original author, truncate comment + subject to 80 characters
 ./bin/todox --type fixme --mode first --full --truncate 80
 
-# 作者名/メールで絞り込み（正規表現）
+# Filter by author name or email (regular expression)
 ./bin/todox -a 'Mikiyasu|phyten'
 
-# TSV / JSON で出力
+# Export as TSV or JSON
 ./bin/todox --output tsv  > todo.tsv
 ./bin/todox --output json > todo.json
 ```
 
-### Web モード
+### Web mode
 
 ```bash
 ./bin/todox serve -p 8080
-# -> http://localhost:8080 （API: /api/scan）
+# -> http://localhost:8080 (JSON API: /api/scan)
 ```
 
 ---
 
-## Devcontainer（推奨の開発環境）
+## Dev Container (recommended development setup)
 
-Dev Containers CLI で reproducible に開発できます。
+The provided Dev Container gives you a reproducible environment.
 
 ```bash
 devcontainer up --workspace-folder .
@@ -77,71 +81,71 @@ devcontainer exec --workspace-folder . bash
 make build
 ```
 
-> Codespaces でも `.devcontainer/devcontainer.json` が読み込まれます。
-> ローカル CLI では 8080 を publish 済み（`runArgs -p 8080:8080`）。
+> GitHub Codespaces automatically reads `.devcontainer/devcontainer.json`.
+> The local configuration publishes port 8080 (`runArgs -p 8080:8080`).
 
 ---
 
-## CLI オプション（抜粋）
+## CLI options (highlights)
 
-* `--type {todo|fixme|both}` : 対象タグ（既定: both）
-* `--mode {last|first}` : 作者の定義（既定: last）
-* `--author REGEX` : 作者名/メールの正規表現フィルタ
-* `--with-comment` / `--with-message` / `--full`
-* `--truncate N` / `--truncate-comment N` / `--truncate-message N`
-* `--output {table|tsv|json}`
-* `--no-progress` / `--progress`
-* `--no-ignore-ws` : `git blame` に `-w` を付けない（空白変更も最新扱い）
+- `--type {todo|fixme|both}`: which markers to scan (default: both)
+- `--mode {last|first}`: author definition (default: last)
+- `--author REGEX`: filter by author name or email
+- `--with-comment` / `--with-message` / `--full`
+- `--truncate N` / `--truncate-comment N` / `--truncate-message N`
+- `--output {table|tsv|json}`
+- `--no-progress` / `--progress`
+- `--no-ignore-ws`: run `git blame` without `-w` so whitespace-only edits are considered latest
 
-ヘルプ：`./bin/todox -h`（英語/日本語切替付き）
-
----
-
-## 注意・既知の制限
-
-* `--mode first` は `git log -L` を多用するため、大規模リポジトリでは時間がかかります（進捗/ETA 表示あり）。
-* `git` を必ずインストールしてください。コンテナ/Docker でもランタイムに `git` が必要です。
-* 検索対象は **大文字の `TODO` / `FIXME`** です（小文字は対象外）。
+Full help: `./bin/todox -h` (bilingual output).
 
 ---
 
-## 開発（Make タスク）
+## Caveats & known limitations
 
-* `make build` … `bin/todox` を生成
-* `make serve` … Web モードで起動
-* `make lint` … `golangci-lint run`（`golangci-lint` が PATH に必要）
-* `make fmt` / `make vet` / `make clean`
-
----
-
-## Lint
-
-`golangci-lint` を使った静的解析を `make lint` で実行できます。
-
-* 初回は `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0` でバイナリを取得してください。
-* devcontainer の外から実行する場合は `./scripts/dcrun make lint` を推奨します。
-* devcontainer 内のシェルであれば `make lint` をそのまま呼んで問題ありません。
-* GitHub Actions の `Lint` / `Test` / `Build` ワークフローでそれぞれ自動実行しています。
+- `--mode first` relies heavily on `git log -L`, which can be slow on very large repositories. A progress bar and ETA are displayed.
+- `git` must be available at runtime—even inside containers.
+- Only uppercase `TODO` / `FIXME` markers are detected.
 
 ---
 
-## Release
+## Development (Make targets)
 
-タグを `v*` 形式で push すると GitHub Actions の `Release` ワークフローが起動し、Linux / macOS / Windows 向けのバイナリをクロスコンパイルしてリリースページに添付します。
-
-Homebrew tap を自動更新したい場合は、事前に以下を準備してください。
-
-* `phyten/homebrew-todox` のような tap リポジトリを作成（`Formula/todox.rb` をこのワークフローが自動生成します）
-* tap リポジトリへ push 可能な PAT を発行し、`HOMEBREW_TAP_TOKEN` として Actions シークレットに登録
+- `make build`: produce `bin/todox`
+- `make serve`: launch the web UI
+- `make lint`: run `golangci-lint` (binary must be on `PATH`)
+- `make fmt` / `make vet` / `make clean`
 
 ---
 
-## ロードマップ（抜粋）
+## Linting
 
-* `--with-age`（AGE 列）と `--sort`, `--group-by`
-* リモート（GitHub/GitLab/Gitea）への行リンク生成
-* Markdown / CSV 出力、fzf/TUI、`-M/-C` での行移動検出
-* ファイル単位 blame の一括取得で高速化
+Static analysis is powered by `golangci-lint` via `make lint`.
+
+- Install the binary once with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0`
+- Outside the dev container, prefer `./scripts/dcrun make lint`
+- Inside the container, `make lint` works directly
+- CI runs the `Lint`, `Test`, and `Build` workflows automatically
+
+---
+
+## Release process
+
+Pushing a `v*` tag triggers the `Release` workflow, which cross-compiles binaries for Linux, macOS, and Windows and attaches them to the GitHub release.
+
+To update a Homebrew tap automatically, prepare:
+
+- A tap repository such as `phyten/homebrew-todox` (the workflow generates `Formula/todox.rb`)
+- A personal access token with push permission stored as the `HOMEBREW_TAP_TOKEN` secret
+
+---
+
+## Roadmap (highlights)
+
+- `--with-age` column plus sorting / grouping options
+- Deep links to remote hosts (GitHub / GitLab / Gitea)
+- Additional outputs (Markdown, CSV), fzf/TUI integration, detection of moved lines via `-M/-C`
+- Faster scans by batching file-level blame queries
 
 ---
 
