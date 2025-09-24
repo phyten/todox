@@ -23,7 +23,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	res := &engine.Result{
 		HasComment: true,
 		HasMessage: true,
-		Items: []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
+		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
 	printTSV(res, engine.Options{})
@@ -52,7 +52,7 @@ func TestPrintTSVはコメント改行を空白に変換する(t *testing.T) {
 
 	res := &engine.Result{
 		HasComment: true,
-		Items: []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
+		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
 	printTSV(res, engine.Options{})

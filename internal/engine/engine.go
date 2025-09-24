@@ -75,7 +75,10 @@ func Run(opts Options) (*Result, error) {
 	defer cancel()
 
 	// worker pool
-	type job struct{ idx int; m match }
+	type job struct {
+		idx int
+		m   match
+	}
 	jobs := make(chan job)
 	var wg sync.WaitGroup
 
@@ -93,7 +96,7 @@ func Run(opts Options) (*Result, error) {
 			item := processOne(ctx, opts, j.m)
 			// author filter (name or email)
 			if authorRe != nil {
-				if !(authorRe.MatchString(item.Author) || authorRe.MatchString(item.Email)) {
+				if !authorRe.MatchString(item.Author) && !authorRe.MatchString(item.Email) {
 					// mark as skipped by empty commit
 					item.Commit = ""
 				}

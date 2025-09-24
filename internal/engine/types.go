@@ -2,7 +2,7 @@ package engine
 
 // Item は 1 件の TODO/FIXME を表す
 type Item struct {
-	Kind    string `json:"kind"`   // TODO | FIXME | TODO|FIXME
+	Kind    string `json:"kind"` // TODO | FIXME | TODO|FIXME
 	Author  string `json:"author"`
 	Email   string `json:"email"`
 	Date    string `json:"date"`   // author date (iso-strict-local)
@@ -31,9 +31,9 @@ type Options struct {
 
 // Result は出力
 type Result struct {
-	Items       []Item `json:"items"`
-	HasComment  bool   `json:"has_comment"`
-	HasMessage  bool   `json:"has_message"`
-	Total       int    `json:"total"`
-	ElapsedMS   int64  `json:"elapsed_ms"`
+	Items      []Item `json:"items"`
+	HasComment bool   `json:"has_comment"`
+	HasMessage bool   `json:"has_message"`
+	Total      int    `json:"total"`
+	ElapsedMS  int64  `json:"elapsed_ms"`
 }

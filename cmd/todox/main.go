@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -61,18 +62,18 @@ func scanCmd(args []string) {
 	}
 
 	opts := engine.Options{
-		Type:           *typ,
-		Mode:           *mode,
-		AuthorRegex:    *author,
-		WithComment:    *withComment,
-		WithMessage:    *withMessage,
-		TruncAll:       *truncAll,
-		TruncComment:   *truncComment,
-		TruncMessage:   *truncMessage,
-		IgnoreWS:       !*noIgnoreWS,
-		Jobs:           *jobs,
-		RepoDir:        *repo,
-		Progress:       util.ShouldShowProgress(*forceProg, *noProgress),
+		Type:         *typ,
+		Mode:         *mode,
+		AuthorRegex:  *author,
+		WithComment:  *withComment,
+		WithMessage:  *withMessage,
+		TruncAll:     *truncAll,
+		TruncComment: *truncComment,
+		TruncMessage: *truncMessage,
+		IgnoreWS:     !*noIgnoreWS,
+		Jobs:         *jobs,
+		RepoDir:      *repo,
+		Progress:     util.ShouldShowProgress(*forceProg, *noProgress),
 	}
 
 	res, err := engine.Run(opts)
@@ -214,14 +215,17 @@ func atoi(s string) int {
 
 func printTSV(res *engine.Result, _ engine.Options) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
+	write := func(text string) {
+		mustFprintln(w, text)
+	}
 	if res.HasComment && res.HasMessage {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
 	} else if res.HasComment {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
 	} else if res.HasMessage {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
 	} else {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
 	}
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
@@ -236,21 +240,26 @@ func printTSV(res *engine.Result, _ engine.Options) {
 		for i := range base {
 			base[i] = sanitizeTSVField(base[i])
 		}
-		fmt.Fprintln(w, strings.Join(base, "\t"))
+		write(strings.Join(base, "\t"))
 	}
-	_ = w.Flush()
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func printTable(res *engine.Result, _ engine.Options) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	write := func(text string) {
+		mustFprintln(w, text)
+	}
 	if res.HasComment && res.HasMessage {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
 	} else if res.HasComment {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
 	} else if res.HasMessage {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
 	} else {
-		fmt.Fprintln(w, "TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
 	}
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
@@ -262,9 +271,17 @@ func printTable(res *engine.Result, _ engine.Options) {
 		} else if res.HasMessage {
 			base = append(base, it.Message)
 		}
-		fmt.Fprintln(w, strings.Join(base, "\t"))
+		write(strings.Join(base, "\t"))
 	}
-	_ = w.Flush()
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func mustFprintln(w io.Writer, text string) {
+	if _, err := fmt.Fprintln(w, text); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func short(s string) string {
