@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -27,27 +28,105 @@ func main() {
 	scanCmd(os.Args[1:])
 }
 
-func scanCmd(args []string) {
-	fs := flag.NewFlagSet("todox", flag.ExitOnError)
+type scanConfig struct {
+	opts        engine.Options
+	output      string
+	withComment bool
+	withMessage bool
+	showHelp    bool
+	helpLang    string
+}
 
-	var (
-		typ          = fs.String("type", "both", "todo|fixme|both")
-		mode         = fs.String("mode", "last", "last|first")
-		author       = fs.String("author", "", "filter by author name/email (regexp)")
-		output       = fs.String("output", "table", "table|tsv|json")
-		withComment  = fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
-		withMessage  = fs.Bool("with-message", false, "show commit subject (1st line)")
-		full         = fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
-		truncAll     = fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
-		truncComment = fs.Int("truncate-comment", 0, "truncate comment only (0=unlimited)")
-		truncMessage = fs.Int("truncate-message", 0, "truncate message only (0=unlimited)")
-		noIgnoreWS   = fs.Bool("no-ignore-ws", false, "include whitespace-only changes in blame")
-		noProgress   = fs.Bool("no-progress", false, "disable progress/ETA")
-		forceProg    = fs.Bool("progress", false, "force progress even when piped")
-		jobs         = fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
-		repo         = fs.String("repo", ".", "repo root (default: current dir)")
-	)
-	_ = fs.Parse(args)
+func parseScanArgs(args []string, envLang string) (scanConfig, error) {
+	cfg := scanConfig{helpLang: strings.ToLower(envLang)}
+	if cfg.helpLang == "" {
+		cfg.helpLang = "en"
+	}
+
+	fs := flag.NewFlagSet("todox", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	typ := fs.String("type", "both", "todo|fixme|both")
+	mode := fs.String("mode", "last", "last|first")
+	author := fs.String("author", "", "filter by author name/email (regexp)")
+	output := fs.String("output", "table", "table|tsv|json")
+	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
+	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
+	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
+	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
+	truncAll := fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
+	truncComment := fs.Int("truncate-comment", 0, "truncate comment only (0=unlimited)")
+	truncMessage := fs.Int("truncate-message", 0, "truncate message only (0=unlimited)")
+	noIgnoreWS := fs.Bool("no-ignore-ws", false, "include whitespace-only changes in blame")
+	noProgress := fs.Bool("no-progress", false, "disable progress/ETA")
+	forceProg := fs.Bool("progress", false, "force progress even when piped")
+	lang := fs.String("lang", "", "help language (en|ja)")
+	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
+	repo := fs.String("repo", ".", "repo root (default: current dir)")
+
+	shortMap := map[string]string{
+		"-t": "--type",
+		"-m": "--mode",
+		"-a": "--author",
+		"-o": "--output",
+	}
+
+	normalized := make([]string, 0, len(args))
+	helpLangSet := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-h" || arg == "--help":
+			cfg.showHelp = true
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				cfg.helpLang = strings.ToLower(args[i+1])
+				helpLangSet = true
+				i++
+			}
+		case strings.HasPrefix(arg, "--help="):
+			cfg.showHelp = true
+			cfg.helpLang = strings.ToLower(strings.TrimPrefix(arg, "--help="))
+			helpLangSet = true
+		case arg == "--help-ja":
+			cfg.showHelp = true
+			cfg.helpLang = "ja"
+			helpLangSet = true
+		case arg == "--help-en":
+			cfg.showHelp = true
+			cfg.helpLang = "en"
+			helpLangSet = true
+		default:
+			if long, ok := shortMap[arg]; ok {
+				normalized = append(normalized, long)
+				continue
+			}
+			matched := false
+			for short, long := range shortMap {
+				if strings.HasPrefix(arg, short+"=") {
+					normalized = append(normalized, long+"="+arg[len(short)+1:])
+					matched = true
+					break
+				}
+				if strings.HasPrefix(arg, short) && len(arg) > len(short) {
+					normalized = append(normalized, long, arg[len(short):])
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
+			normalized = append(normalized, arg)
+		}
+	}
+
+	if err := fs.Parse(normalized); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			cfg.showHelp = true
+			return cfg, nil
+		}
+		return cfg, err
+	}
 
 	if *full {
 		if !*withComment {
@@ -61,7 +140,19 @@ func scanCmd(args []string) {
 		}
 	}
 
-	opts := engine.Options{
+	if *withSnippet {
+		*withComment = true
+	}
+
+	if *lang != "" && !helpLangSet {
+		cfg.helpLang = strings.ToLower(*lang)
+		helpLangSet = true
+	}
+	if cfg.helpLang == "" {
+		cfg.helpLang = "en"
+	}
+
+	cfg.opts = engine.Options{
 		Type:         *typ,
 		Mode:         *mode,
 		AuthorRegex:  *author,
@@ -75,13 +166,35 @@ func scanCmd(args []string) {
 		RepoDir:      *repo,
 		Progress:     util.ShouldShowProgress(*forceProg, *noProgress),
 	}
+	cfg.output = *output
+	cfg.withComment = *withComment
+	cfg.withMessage = *withMessage
 
-	res, err := engine.Run(opts)
+	return cfg, nil
+}
+
+func scanCmd(args []string) {
+	envLang := os.Getenv("GIT_TODO_AUTHORS_LANG")
+	if envLang == "" {
+		envLang = os.Getenv("GTA_LANG")
+	}
+
+	cfg, err := parseScanArgs(args, envLang)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	switch strings.ToLower(*output) {
+	if cfg.showHelp {
+		printHelp(cfg.helpLang)
+		return
+	}
+
+	res, err := engine.Run(cfg.opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	switch strings.ToLower(cfg.output) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -89,11 +202,160 @@ func scanCmd(args []string) {
 			log.Fatal(err)
 		}
 	case "tsv":
-		printTSV(res, opts)
+		printTSV(res, cfg.opts)
 	default: // table
-		printTable(res, opts)
+		printTable(res, cfg.opts)
 	}
 }
+
+func printHelp(lang string) {
+	switch strings.ToLower(lang) {
+	case "ja", "ja_jp", "ja-jp":
+		fmt.Print(helpJapanese)
+	default:
+		fmt.Print(helpEnglish)
+	}
+}
+
+const helpEnglish = `todox — Find who wrote TODO/FIXME lines in a Git repo.
+
+Usage:
+  todox [options]
+
+Search & attribution:
+  -t, --type {todo|fixme|both}   Search target (default: both)
+  -m, --mode {last|first}        last: last modifier via blame (fast)
+                                 first: first introducer via 'git log -L' (slow)
+  -a, --author REGEX             Filter by author name or email (extended regex)
+
+Output:
+  -o, --output {table|tsv|json}  Output format (default: table)
+
+Extra columns (hidden by default):
+      --full                     Show both COMMENT and MESSAGE columns
+      --with-comment             Show COMMENT (line text trimmed to start at TODO/FIXME)
+      --with-message             Show MESSAGE (commit subject = 1st line)
+      --with-snippet             Alias of --with-comment (backward compatible)
+
+Truncation (applies to COMMENT / MESSAGE only):
+      --truncate N               Truncate both to N chars (0 = unlimited)
+      --truncate-comment N       Truncate comment to N chars (0 = unlimited)
+      --truncate-message N       Truncate message to N chars (0 = unlimited)
+                                 Tip: --full alone defaults to 120 chars for both.
+
+Blame / progress:
+      --no-ignore-ws             Do not pass -w to git blame (whitespace changes count)
+      --no-progress              Do not show progress/ETA
+      --progress                 Force progress even when piped
+
+Help / language:
+  -h, --help [en|ja]             Show help in English (default) or Japanese
+      --help=ja                  Same as -h ja
+      --help-ja                  Same as -h ja
+      --lang {en|ja}             Language for help (e.g. --lang ja -h)
+Environment:
+      GTA_LANG=ja                Default help language (also: GIT_TODO_AUTHORS_LANG)
+
+Examples:
+  1) Show last author for all TODO/FIXME:
+       todox
+
+  2) Show first introducer (who wrote the TODO at first):
+       todox -m first
+
+  3) Filter by author (name or email, regex):
+       todox -a 'Alice|alice@example.com'
+
+  4) Only TODO (not FIXME):
+       todox -t todo
+
+  5) Show the TODO line and the commit message, both trimmed:
+       todox --full                 # defaults to 120 chars each
+       todox --full --truncate 80   # 80 chars for both
+
+  6) Different truncate per field (comment 60, message unlimited):
+       todox --full --truncate-comment 60 --truncate-message 0
+
+  7) Machine-friendly TSV:
+       todox --full -o tsv > todo_full.tsv
+
+  8) Progress control:
+       todox --no-progress
+       todox --progress | head   # force progress even when piped
+
+  9) Include whitespace-only changes in blame:
+       todox --no-ignore-ws
+`
+
+const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が書いたか」を特定するツール。
+
+使い方:
+  todox [options]
+
+検索と属性付け:
+  -t, --type {todo|fixme|both}   検索対象（既定: both）
+  -m, --mode {last|first}        last : その行を最後に変更した人（git blame で高速）
+                                 first: その TODO/FIXME を最初に入れた人（git log -L で低速）
+  -a, --author REGEX             作者名またはメールを正規表現でフィルタ
+
+出力:
+  -o, --output {table|tsv|json}  出力形式（既定: table）
+
+追加カラム（既定は非表示）:
+      --full                     COMMENT と MESSAGE を両方表示
+      --with-comment             COMMENT（行テキスト。TODO/FIXME から表示）
+      --with-message             MESSAGE（コミットメッセージの1行目）
+      --with-snippet             --with-comment の別名（後方互換）
+
+トランケート（COMMENT/MESSAGE のみ対象）:
+      --truncate N               両方を N 文字で切り詰め（0=無制限）
+      --truncate-comment N       コメントのみ N 文字で切り詰め（0=無制限）
+      --truncate-message N       メッセージのみ N 文字で切り詰め（0=無制限）
+                                 ※ --full だけ指定した場合は既定で 120 文字
+
+Blame / 進捗:
+      --no-ignore-ws             git blame の -w を無効化（空白変更も追跡）
+      --no-progress              進捗/ETA を表示しない
+      --progress                 パイプ時でも進捗表示を強制
+
+ヘルプ / 言語:
+  -h, --help [en|ja]             ヘルプ表示（既定: 英語、ja を付けると日本語）
+      --help=ja                  -h ja と同等
+      --help-ja                  -h ja と同等
+      --lang {en|ja}             言語指定（例: --lang ja -h）
+環境変数:
+      GTA_LANG=ja                既定のヘルプ言語（GIT_TODO_AUTHORS_LANG でも可）
+
+Examples:
+  1) TODO/FIXME の「最後に触った人」を一覧:
+       todox
+
+  2) TODO/FIXME を「最初に入れた人」を特定:
+       todox -m first
+
+  3) 作者で絞り込み（名前/メールを正規表現で）:
+       todox -a 'Alice|alice@example.com'
+
+  4) TODO のみ対象:
+       todox -t todo
+
+  5) コメント行とコミットメッセージを一緒に（どちらもトリム）:
+       todox --full                 # 既定で各120文字
+       todox --full --truncate 80   # 各80文字に変更
+
+  6) 片方だけトランケート指定（コメント60 / メッセージは無制限）:
+       todox --full --truncate-comment 60 --truncate-message 0
+
+  7) 機械処理向け TSV 出力:
+       todox --full -o tsv > todo_full.tsv
+
+  8) 進捗制御:
+       todox --no-progress
+       todox --progress | head   # パイプでも進捗を表示
+
+  9) 空白変更も blame 対象にする:
+       todox --no-ignore-ws
+`
 
 func serveCmd(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
