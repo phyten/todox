@@ -88,3 +88,19 @@ func TestBlameSHAコマンド引数(t *testing.T) {
 		}
 	})
 }
+
+func TestCommitMetaエラー時はプレースホルダーとエラーを返す(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	author, email, date, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err == nil {
+		t.Fatalf("エラーが返される想定でした")
+	}
+	if author != "-" || email != "-" || date != "-" || subject != "-" {
+		t.Fatalf("エラー時のプレースホルダーが想定外です: %q %q %q %q", author, email, date, subject)
+	}
+	if !strings.Contains(err.Error(), "git show") {
+		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
+	}
+}

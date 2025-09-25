@@ -205,6 +205,11 @@ func scanCmd(args []string) {
 	default: // table
 		printTable(res, cfg.opts)
 	}
+
+	if res.ErrorCount > 0 {
+		reportErrors(res)
+		os.Exit(2)
+	}
 }
 
 func printHelp(lang string) {
@@ -374,6 +379,7 @@ code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
 label{margin-right:12px}
 input[type=text]{width:240px}
 .small{color:#666}
+.errors{background:#fff4f4;border:1px solid #f2c6c6;padding:8px;margin:12px 0;}
 </style></head><body>
 <h2>todox</h2>
 <form id="f">
@@ -403,25 +409,44 @@ f.onsubmit=async (e)=>{
  const q=new URLSearchParams(new FormData(f));
  const res=await fetch('/api/scan?'+q.toString());
  const data=await res.json();
- out.innerHTML=render(data.items);
+ out.innerHTML=render(data);
 }
 function esc(s){return (s||'').replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function render(rows){
- if(!rows||rows.length===0) return '<p>No results.</p>';
+function render(data){
+ const rows=data.items||[];
+ const errs=data.errors||[];
+ let parts=[];
+ if(errs.length){
+        let list='<ul>';
+        for(const e of errs){
+                const file=e.file?esc(e.file):'(unknown)';
+                const line=e.line>0?e.line:'&mdash;';
+                const loc=file+':'+line;
+                list+='<li><code>'+loc+'</code> ['+esc(e.stage||'git')+'] '+esc(e.message||'')+'</li>';
+        }
+        list+='</ul>';
+        parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
+ }
+ if(!rows||rows.length===0){
+        parts.push('<p>No results.</p>');
+        return parts.join('');
+ }
  let h='<table><thead><tr><th>TYPE</th><th>AUTHOR</th><th>EMAIL</th><th>DATE</th><th>COMMIT</th><th>LOCATION</th><th>COMMENT</th><th>MESSAGE</th></tr></thead><tbody>';
  for(const r of rows){
-	h+='<tr>'+
-		'<td>'+esc(r.kind||'')+'</td>'+
-		'<td>'+esc(r.author||'')+'</td>'+
-		'<td>'+esc(r.email||'')+'</td>'+
-		'<td>'+esc(r.date||'')+'</td>'+
-		'<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
-		'<td><code>'+esc(r.file||'')+':'+(r.line||'')+'</code></td>'+
-		'<td>'+esc(r.comment||'')+'</td>'+
-		'<td>'+esc(r.message||'')+'</td>'+
-		'</tr>';
+        h+='<tr>'+
+                '<td>'+esc(r.kind||'')+'</td>'+
+                '<td>'+esc(r.author||'')+'</td>'+
+                '<td>'+esc(r.email||'')+'</td>'+
+                '<td>'+esc(r.date||'')+'</td>'+
+                '<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
+                '<td><code>'+esc(r.file||'')+':'+(r.line||'')+'</code></td>'+
+                '<td>'+esc(r.comment||'')+'</td>'+
+                '<td>'+esc(r.message||'')+'</td>'+
+                '</tr>';
  }
- h+='</tbody></table>'; return h;
+ h+='</tbody></table>';
+ parts.push(h);
+ return parts.join('');
 }
 </script></body></html>`
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -558,6 +583,29 @@ func sanitizeTSVField(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\t", " ")
 	return s
+}
+
+func reportErrors(res *engine.Result) {
+	const maxDetails = 5
+	fmt.Fprintf(os.Stderr, "todox: %d error(s) while invoking git commands\n", res.ErrorCount)
+	for i, e := range res.Errors {
+		if i >= maxDetails {
+			remaining := res.ErrorCount - maxDetails
+			if remaining > 0 {
+				fmt.Fprintf(os.Stderr, "  ... (%d more)\n", remaining)
+			}
+			break
+		}
+		loc := fmt.Sprintf("%s:%d", e.File, e.Line)
+		if e.File == "" && e.Line == 0 {
+			loc = "(unknown location)"
+		}
+		stage := e.Stage
+		if stage == "" {
+			stage = "git"
+		}
+		fmt.Fprintf(os.Stderr, "  - %s [%s] %s\n", loc, stage, e.Message)
+	}
 }
 
 func mustAbs(p string) string {

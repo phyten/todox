@@ -74,3 +74,40 @@ func TestPrintTSVはコメント改行を空白に変換する(t *testing.T) {
 		t.Fatalf("改行が空白に置換されていません: %q", lines[1])
 	}
 }
+
+func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = oldStderr })
+
+	res := &engine.Result{
+		ErrorCount: 3,
+		Errors: []engine.ItemError{
+			{File: "a.go", Line: 10, Stage: "git blame", Message: "exit status 1"},
+			{File: "b.go", Line: 20, Stage: "git show", Message: "no commit"},
+			{File: "", Line: 0, Stage: "", Message: "mystery"},
+		},
+	}
+
+	reportErrors(res)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "3 error(s)") {
+		t.Fatalf("エラー件数が出力されていません: %q", text)
+	}
+	if !strings.Contains(text, "a.go:10 [git blame] exit status 1") {
+		t.Fatalf("詳細行が出力されていません: %q", text)
+	}
+	if !strings.Contains(text, "(unknown location) [git] mystery") {
+		t.Fatalf("不明位置の行が期待通りではありません: %q", text)
+	}
+}

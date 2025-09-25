@@ -70,6 +70,8 @@ func Run(opts Options) (*Result, error) {
 
 	out := make([]Item, len(matches))
 	prog := util.NewProgress(len(matches), opts.Progress)
+	var errsMu sync.Mutex
+	var errs []ItemError
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -93,9 +95,14 @@ func Run(opts Options) (*Result, error) {
 	worker := func() {
 		defer wg.Done()
 		for j := range jobs {
-			item := processOne(ctx, opts, j.m)
+			item, itemErrs := processOne(ctx, opts, j.m)
+			if len(itemErrs) > 0 {
+				errsMu.Lock()
+				errs = append(errs, itemErrs...)
+				errsMu.Unlock()
+			}
 			// author filter (name or email)
-			if authorRe != nil {
+			if authorRe != nil && item.Commit != "" {
 				if !authorRe.MatchString(item.Author) && !authorRe.MatchString(item.Email) {
 					// mark as skipped by empty commit
 					item.Commit = ""
@@ -137,31 +144,66 @@ func Run(opts Options) (*Result, error) {
 		return final[i].File < final[j].File
 	})
 
+	sort.Slice(errs, func(i, j int) bool {
+		if errs[i].File == errs[j].File {
+			if errs[i].Line == errs[j].Line {
+				return errs[i].Stage < errs[j].Stage
+			}
+			return errs[i].Line < errs[j].Line
+		}
+		return errs[i].File < errs[j].File
+	})
+
 	return &Result{
 		Items:      final,
 		HasComment: opts.WithComment,
 		HasMessage: opts.WithMessage,
 		Total:      len(final),
 		ElapsedMS:  msSince(start),
+		Errors:     errs,
+		ErrorCount: len(errs),
 	}, nil
 }
 
-func processOne(ctx context.Context, opts Options, m match) Item {
+func newItemError(file string, line int, stage string, err error) ItemError {
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		msg = "unknown error"
+	}
+	return ItemError{File: file, Line: line, Stage: stage, Message: msg}
+}
+
+func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) {
 	it := Item{
 		Kind: kindOf(m.text),
 		File: m.file,
 		Line: m.line,
 	}
 	var sha string
-	var err error
+	var errs []ItemError
 
 	if strings.ToLower(opts.Mode) == "first" {
-		sha, err = firstCommitForLine(ctx, opts.RepoDir, m.file, m.line)
-		if sha == "" || err != nil {
-			sha, _ = blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+		firstSHA, err := firstCommitForLine(ctx, opts.RepoDir, m.file, m.line)
+		if err != nil {
+			errs = append(errs, newItemError(m.file, m.line, "git log -L", err))
+		}
+		if firstSHA != "" {
+			sha = firstSHA
+		} else {
+			bl, err := blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+			if err != nil {
+				errs = append(errs, newItemError(m.file, m.line, "git blame", err))
+				return it, errs
+			}
+			sha = bl
 		}
 	} else {
-		sha, _ = blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+		bl, err := blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+		if err != nil {
+			errs = append(errs, newItemError(m.file, m.line, "git blame", err))
+			return it, errs
+		}
+		sha = bl
 	}
 
 	if sha == "" || sha == strings.Repeat("0", 40) {
@@ -170,7 +212,10 @@ func processOne(ctx context.Context, opts Options, m match) Item {
 		it.Date = "(uncommitted)"
 		it.Commit = ""
 	} else {
-		a, e, d, s := commitMeta(ctx, opts.RepoDir, sha)
+		a, e, d, s, err := commitMeta(ctx, opts.RepoDir, sha)
+		if err != nil {
+			errs = append(errs, newItemError(m.file, m.line, "git show", err))
+		}
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
 		if opts.WithMessage {
 			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
@@ -182,7 +227,7 @@ func processOne(ctx context.Context, opts Options, m match) Item {
 		it.Comment = truncateRunes(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
 	}
 
-	return it
+	return it, errs
 }
 
 func gitGrep(repo, pattern string) ([]match, error) {
@@ -252,18 +297,18 @@ func firstCommitForLine(ctx context.Context, repo, file string, line int) (strin
 	return "", nil
 }
 
-func commitMeta(ctx context.Context, repo, sha string) (author, email, date, subject string) {
+func commitMeta(ctx context.Context, repo, sha string) (author, email, date, subject string, err error) {
 	cmd := exec.CommandContext(ctx, "git", "show", "-s", "--date=iso-strict-local", "--format=%an%x09%ae%x09%ad%x09%s", sha)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
-		return "-", "-", "-", "-"
+		return "-", "-", "-", "-", fmt.Errorf("git show: %w", err)
 	}
 	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 4)
 	if len(parts) != 4 {
-		return "-", "-", "-", "-"
+		return "-", "-", "-", "-", fmt.Errorf("git show unexpected output: %q", strings.TrimSpace(string(out)))
 	}
-	return parts[0], parts[1], parts[2], parts[3]
+	return parts[0], parts[1], parts[2], parts[3], nil
 }
 
 func kindOf(text string) string {
