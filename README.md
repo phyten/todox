@@ -1,8 +1,8 @@
 # todox — TODO/FIXME explorer for Git repositories
 
-[![Lint](https://github.com/example-org/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/lint.yml)
-[![Test](https://github.com/example-org/todox/actions/workflows/test.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/test.yml)
-[![Build](https://github.com/example-org/todox/actions/workflows/build.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/build.yml)
+[![Lint](https://github.com/phyten/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/lint.yml)
+[![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
+[![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
 
 `todox` scans your repository for uppercase **`TODO` / `FIXME`** markers and helps you
 identify **who introduced or last touched** those lines in seconds—either from the CLI or a lightweight web UI.
@@ -27,9 +27,9 @@ identify **who introduced or last touched** those lines in seconds—either from
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap example-org/todox
+brew tap phyten/todox
 brew install todox
-# or: brew install example-org/todox/todox
+# or: brew install phyten/todox/todox
 ```
 
 ### Prerequisites
@@ -55,7 +55,7 @@ make build
 ./bin/todox --type fixme --mode first --full --truncate 80
 
 # Filter by author name or email (regular expression)
-./bin/todox -a 'Alice|example-org'
+./bin/todox -a 'Alice|alice@example.com'
 
 # Export as TSV or JSON
 ./bin/todox --output tsv  > todo.tsv
@@ -135,7 +135,7 @@ Pushing a `v*` tag triggers the `Release` workflow, which cross-compiles binarie
 
 To update a Homebrew tap automatically, prepare:
 
-- A tap repository such as `example-org/homebrew-todox` (the workflow generates `Formula/todox.rb`)
+- A tap repository such as `phyten/homebrew-todox` (the workflow generates `Formula/todox.rb`)
 - A personal access token with push permission stored as the `HOMEBREW_TAP_TOKEN` secret
 
 ---
