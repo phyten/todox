@@ -56,11 +56,11 @@ func (p *Progress) Update(done int) {
 		if remaining < 0 {
 			remaining = 0
 		}
-               if remaining > 0 {
-                       avgPerItem := elapsed / time.Duration(done)
-                       remain := avgPerItem * time.Duration(remaining)
-                       eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
-               }
+		if remaining > 0 {
+			avgPerItem := elapsed / time.Duration(done)
+			remain := avgPerItem * time.Duration(remaining)
+			eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
+		}
 	}
 	// clear line and print
 	fmt.Fprintf(os.Stderr, "\r\033[K[progress] %d/%d (%d%%) ETA %s",
