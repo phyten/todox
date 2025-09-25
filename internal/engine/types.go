@@ -13,6 +13,14 @@ type Item struct {
 	Message string `json:"message,omitempty"` // commit subject (1行目)
 }
 
+// ItemError は 1 行の取得に失敗した際の情報を表す
+type ItemError struct {
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Stage   string `json:"stage"`
+	Message string `json:"message"`
+}
+
 // Options は実行オプション
 type Options struct {
 	Type         string // todo|fixme|both
@@ -31,9 +39,11 @@ type Options struct {
 
 // Result は出力
 type Result struct {
-	Items      []Item `json:"items"`
-	HasComment bool   `json:"has_comment"`
-	HasMessage bool   `json:"has_message"`
-	Total      int    `json:"total"`
-	ElapsedMS  int64  `json:"elapsed_ms"`
+	Items      []Item      `json:"items"`
+	HasComment bool        `json:"has_comment"`
+	HasMessage bool        `json:"has_message"`
+	Total      int         `json:"total"`
+	ElapsedMS  int64       `json:"elapsed_ms"`
+	Errors     []ItemError `json:"errors,omitempty"`
+	ErrorCount int         `json:"error_count"`
 }
