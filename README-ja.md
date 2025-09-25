@@ -1,8 +1,8 @@
 # todox — Git リポジトリ向け TODO/FIXME 探索ツール（日本語版）
 
-[![Lint](https://github.com/phyten/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/lint.yml)
-[![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
-[![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
+[![Lint](https://github.com/example-org/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/lint.yml)
+[![Test](https://github.com/example-org/todox/actions/workflows/test.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/test.yml)
+[![Build](https://github.com/example-org/todox/actions/workflows/build.yml/badge.svg)](https://github.com/example-org/todox/actions/workflows/build.yml)
 
 英語版 README は [README.md](./README.md) を参照してください。
 
@@ -27,9 +27,9 @@
 ### Homebrew（macOS / Linux）
 
 ```bash
-brew tap phyten/todox
+brew tap example-org/todox
 brew install todox
-# または: brew install phyten/todox/todox
+# または: brew install example-org/todox/todox
 ```
 
 ### 依存
@@ -55,7 +55,7 @@ make build
 ./bin/todox --type fixme --mode first --full --truncate 80
 
 # 作者名/メールで絞り込み（正規表現）
-./bin/todox -a 'Mikiyasu|phyten'
+./bin/todox -a 'Alice|example-org'
 
 # TSV / JSON で出力
 ./bin/todox --output tsv  > todo.tsv
@@ -136,7 +136,7 @@ Linux / macOS / Windows 向けのバイナリをクロスコンパイルして�
 
 Homebrew tap を自動更新したい場合は、事前に以下を準備してください。
 
-- `phyten/homebrew-todox` のような tap リポジトリを作成（`Formula/todox.rb` をワークフローが自動生成します）
+- `example-org/homebrew-todox` のような tap リポジトリを作成（`Formula/todox.rb` をワークフローが自動生成します）
 - tap リポジトリへ push 可能な PAT を発行し、`HOMEBREW_TAP_TOKEN` として Actions シークレットに登録
 
 ---
