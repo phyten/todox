@@ -102,7 +102,7 @@ func Run(opts Options) (*Result, error) {
 				}
 			}
 			out[j.idx] = item
-			prog.Update(j.idx + 1)
+			prog.Advance()
 		}
 	}
 
