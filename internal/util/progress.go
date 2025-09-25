@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,21 +26,41 @@ type Progress struct {
 	total   int
 	start   time.Time
 	enabled bool
+	done    atomic.Int64
 }
 
 func NewProgress(total int, enabled bool) *Progress {
 	return &Progress{total: total, start: time.Now(), enabled: enabled}
 }
 
+func (p *Progress) Advance() int {
+	done := int(p.done.Add(1))
+	p.Update(done)
+	return done
+}
+
 func (p *Progress) Update(done int) {
 	if !p.enabled {
 		return
 	}
+	if done < 0 {
+		done = 0
+	}
+	if done > p.total {
+		done = p.total
+	}
 	elapsed := time.Since(p.start)
 	eta := "-"
-	if done > 0 {
-		remain := time.Duration(float64(elapsed) * float64(p.total-done) / float64(done))
-		eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
+	if done > 0 && elapsed > 0 {
+		remaining := p.total - done
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 0 {
+			avgPerItem := elapsed / time.Duration(done)
+			remain := avgPerItem * time.Duration(remaining)
+			eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
+		}
 	}
 	// clear line and print
 	fmt.Fprintf(os.Stderr, "\r\033[K[progress] %d/%d (%d%%) ETA %s",
