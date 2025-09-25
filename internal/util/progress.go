@@ -51,17 +51,18 @@ func (p *Progress) Update(done int) {
 	}
 	elapsed := time.Since(p.start)
 	eta := "-"
-	if done > 0 {
+	if done > 0 && elapsed > 0 {
 		remaining := p.total - done
 		if remaining < 0 {
 			remaining = 0
 		}
-		if elapsed > 0 {
-			rate := float64(done) / elapsed.Seconds()
-			if rate > 0 {
-				remain := time.Duration((float64(remaining) / rate) * float64(time.Second))
-				eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
+		if remaining > 0 {
+			avgPerItem := elapsed / time.Duration(done)
+			if avgPerItem <= 0 {
+				avgPerItem = time.Nanosecond
 			}
+			remain := avgPerItem * time.Duration(remaining)
+			eta = fmt.Sprintf("%02d:%02d:%02d", int(remain.Hours()), int(remain.Minutes())%60, int(remain.Seconds())%60)
 		}
 	}
 	// clear line and print
