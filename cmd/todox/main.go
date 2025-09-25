@@ -146,7 +146,6 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 
 	if *lang != "" && !helpLangSet {
 		cfg.helpLang = strings.ToLower(*lang)
-		helpLangSet = true
 	}
 	if cfg.helpLang == "" {
 		cfg.helpLang = "en"
