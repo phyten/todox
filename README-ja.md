@@ -3,6 +3,7 @@
 [![Lint](https://github.com/phyten/todox/actions/workflows/lint.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/lint.yml)
 [![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
 [![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
+[![Release](https://github.com/phyten/todox/actions/workflows/release.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/release.yml)
 
 英語版 README は [README.md](./README.md) を参照してください。
 
