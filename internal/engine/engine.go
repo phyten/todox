@@ -28,6 +28,10 @@ type match struct {
 	text string
 }
 
+// Run は指定されたオプションに従ってリポジトリを走査し、TODO/FIXME の一覧とメタデータを返します。
+//
+// 成功時には発見した項目と補助情報を保持した Result を返し、
+// 途中で発生したエラー情報は Result.Errors に集約されます。
 func Run(opts Options) (*Result, error) {
 	start := time.Now()
 	if opts.Jobs <= 0 {
