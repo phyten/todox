@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -33,6 +34,8 @@ type scanConfig struct {
 	output      string
 	withComment bool
 	withMessage bool
+	withAge     bool
+	sortKey     string
 	showHelp    bool
 	helpLang    string
 }
@@ -52,6 +55,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	output := fs.String("output", "table", "table|tsv|json")
 	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
+	withAge := fs.Bool("with-age", false, "show AGE column (table/tsv)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
 	truncAll := fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
@@ -60,6 +64,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	noIgnoreWS := fs.Bool("no-ignore-ws", false, "include whitespace-only changes in blame")
 	noProgress := fs.Bool("no-progress", false, "disable progress/ETA")
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
+	sortKey := fs.String("sort", "", "sort order (first step: -age)")
 	lang := fs.String("lang", "", "help language (en|ja)")
 	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
@@ -144,6 +149,12 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		*withComment = true
 	}
 
+	switch *sortKey {
+	case "", "-age":
+	default:
+		return cfg, fmt.Errorf("invalid --sort: %s (supported: -age)", *sortKey)
+	}
+
 	if *lang != "" && !helpLangSet {
 		cfg.helpLang = strings.ToLower(*lang)
 	}
@@ -168,6 +179,8 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.output = *output
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
+	cfg.withAge = *withAge
+	cfg.sortKey = *sortKey
 
 	return cfg, nil
 }
@@ -193,6 +206,10 @@ func scanCmd(args []string) {
 		log.Fatal(err)
 	}
 
+	if cfg.sortKey != "" {
+		sortItems(res.Items, cfg.sortKey)
+	}
+
 	switch strings.ToLower(cfg.output) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -201,9 +218,9 @@ func scanCmd(args []string) {
 			log.Fatal(err)
 		}
 	case "tsv":
-		printTSV(res, cfg.opts)
+		printTSV(res, cfg.opts, cfg.withAge)
 	default: // table
-		printTable(res, cfg.opts)
+		printTable(res, cfg.opts, cfg.withAge)
 	}
 
 	if res.ErrorCount > 0 {
@@ -240,12 +257,16 @@ Extra columns (hidden by default):
       --with-comment             Show COMMENT (line text trimmed to start at TODO/FIXME)
       --with-message             Show MESSAGE (commit subject = 1st line)
       --with-snippet             Alias of --with-comment (backward compatible)
+      --with-age                 Show AGE (days since author date) in table/TSV
 
 Truncation (applies to COMMENT / MESSAGE only):
       --truncate N               Truncate both to N chars (0 = unlimited)
       --truncate-comment N       Truncate comment to N chars (0 = unlimited)
       --truncate-message N       Truncate message to N chars (0 = unlimited)
                                  Tip: --full alone defaults to 120 chars for both.
+
+Sorting:
+      --sort -age                Oldest items first (fallback: file/line)
 
 Blame / progress:
       --no-ignore-ws             Do not pass -w to git blame (whitespace changes count)
@@ -310,12 +331,16 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --with-comment             COMMENT（行テキスト。TODO/FIXME から表示）
       --with-message             MESSAGE（コミットメッセージの1行目）
       --with-snippet             --with-comment の別名（後方互換）
+      --with-age                 AGE（日数）列を table/TSV に追加
 
 トランケート（COMMENT/MESSAGE のみ対象）:
       --truncate N               両方を N 文字で切り詰め（0=無制限）
       --truncate-comment N       コメントのみ N 文字で切り詰め（0=無制限）
       --truncate-message N       メッセージのみ N 文字で切り詰め（0=無制限）
                                  ※ --full だけ指定した場合は既定で 120 文字
+
+並び替え:
+      --sort -age                最古順（降順）。同値は file/line
 
 Blame / 進捗:
       --no-ignore-ws             git blame の -w を無効化（空白変更も追跡）
@@ -619,28 +644,51 @@ func parseIntParam(q map[string][]string, key string) (int, error) {
 	return n, nil
 }
 
-func printTSV(res *engine.Result, _ engine.Options) {
+func sortItems(items []engine.Item, key string) {
+	switch key {
+	case "":
+		return
+	case "-age":
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].AgeDays == items[j].AgeDays {
+				if items[i].File == items[j].File {
+					return items[i].Line < items[j].Line
+				}
+				return items[i].File < items[j].File
+			}
+			return items[i].AgeDays > items[j].AgeDays
+		})
+	}
+}
+
+func printTSV(res *engine.Result, _ engine.Options, showAge bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if showAge {
+		headers = append(headers, "AGE")
 	}
+	headers = append(headers, "COMMIT", "LOCATION")
+	if res.HasComment {
+		headers = append(headers, "COMMENT")
+	}
+	if res.HasMessage {
+		headers = append(headers, "MESSAGE")
+	}
+	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if showAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {
@@ -653,28 +701,34 @@ func printTSV(res *engine.Result, _ engine.Options) {
 	}
 }
 
-func printTable(res *engine.Result, _ engine.Options) {
+func printTable(res *engine.Result, _ engine.Options, showAge bool) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if showAge {
+		headers = append(headers, "AGE")
 	}
+	headers = append(headers, "COMMIT", "LOCATION")
+	if res.HasComment {
+		headers = append(headers, "COMMENT")
+	}
+	if res.HasMessage {
+		headers = append(headers, "MESSAGE")
+	}
+	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if showAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {

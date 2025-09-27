@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBlameSHAコマンド引数(t *testing.T) {
@@ -96,12 +97,15 @@ func TestCommitMetaエラー時はプレースホルダーとエラーを返す(
 	ctx := context.Background()
 	repo := t.TempDir()
 
-	author, email, date, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	author, email, date, ts, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatalf("エラーが返される想定でした")
 	}
 	if author != "-" || email != "-" || date != "-" || subject != "-" {
 		t.Fatalf("エラー時のプレースホルダーが想定外です: %q %q %q %q", author, email, date, subject)
+	}
+	if !ts.IsZero() {
+		t.Fatalf("エラー時のタイムスタンプはゼロ値の想定です: %v", ts)
 	}
 	if !strings.Contains(err.Error(), "git show") {
 		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
@@ -177,6 +181,23 @@ func TestEffectiveTrunc優先順位(t *testing.T) {
 		if got := effectiveTrunc(tc.specific, tc.all); got != tc.want {
 			t.Fatalf("effectiveTrunc(%d, %d) = %d, want %d", tc.specific, tc.all, got, tc.want)
 		}
+	}
+}
+
+func TestAgeDays計算(t *testing.T) {
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	tenDaysAgo := now.AddDate(0, 0, -10)
+	if got := ageDays(now, tenDaysAgo); got != 10 {
+		t.Fatalf("10日前との差分が期待と異なります: got=%d", got)
+	}
+
+	future := now.Add(12 * time.Hour)
+	if got := ageDays(now, future); got != 0 {
+		t.Fatalf("未来日時は0日にクリップされる想定です: got=%d", got)
+	}
+
+	if got := ageDays(now, time.Time{}); got != 0 {
+		t.Fatalf("ゼロ値の日時は0を返す想定です: got=%d", got)
 	}
 }
 
