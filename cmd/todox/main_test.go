@@ -111,3 +111,54 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 		t.Fatalf("不明位置の行が期待通りではありません: %q", text)
 	}
 }
+
+func TestParseBoolParamは受け入れ値を解釈する(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		value   string
+		want    bool
+		wantErr bool
+	}{
+		"未指定は偽":    {want: false},
+		"空文字は偽":    {value: "", want: false},
+		"1は真":      {value: "1", want: true},
+		"trueは真":   {value: "true", want: true},
+		"TRUEは真":   {value: "TRUE", want: true},
+		"yesは真":    {value: "yes", want: true},
+		"onは真":     {value: "on", want: true},
+		"0は偽":      {value: "0", want: false},
+		"falseは偽":  {value: "false", want: false},
+		"FALSEは偽":  {value: "FALSE", want: false},
+		"noは偽":     {value: "no", want: false},
+		"offは偽":    {value: "off", want: false},
+		"無効値はエラー":  {value: "maybe", wantErr: true},
+		"前後空白はトリム": {value: "  true  ", want: true},
+	}
+
+	for name, tc := range cases {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			q := map[string][]string{}
+			if tc.value != "" || (tc.value == "" && name == "空文字は偽") {
+				q["flag"] = []string{tc.value}
+			}
+
+			got, err := parseBoolParam(q, "flag")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("エラーを期待しましたが nil でした")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("予期しないエラー: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("結果が一致しません: got=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}

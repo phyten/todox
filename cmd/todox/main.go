@@ -455,12 +455,24 @@ function render(data){
 
 	http.HandleFunc("/api/scan", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+
+		withComment, err := parseBoolParam(q, "with_comment")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		withMessage, err := parseBoolParam(q, "with_message")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		opts := engine.Options{
 			Type:         get(q, "type", "both"),
 			Mode:         get(q, "mode", "last"),
 			AuthorRegex:  q.Get("author"),
-			WithComment:  q.Get("with_comment") != "",
-			WithMessage:  q.Get("with_message") != "",
+			WithComment:  withComment,
+			WithMessage:  withMessage,
 			TruncAll:     atoi(q.Get("truncate")),
 			TruncComment: atoi(q.Get("truncate_comment")),
 			TruncMessage: atoi(q.Get("truncate_message")),
@@ -492,6 +504,26 @@ func get(q map[string][]string, k, def string) string {
 		return v[0]
 	}
 	return def
+}
+
+func parseBoolParam(q map[string][]string, key string) (bool, error) {
+	vals, ok := q[key]
+	if !ok || len(vals) == 0 {
+		return false, nil
+	}
+	raw := strings.TrimSpace(vals[0])
+	if raw == "" {
+		return false, nil
+	}
+
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid value for %s: %q", key, raw)
+	}
 }
 
 func atoi(s string) int {
