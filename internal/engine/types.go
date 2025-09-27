@@ -1,11 +1,14 @@
 package engine
 
+import "time"
+
 // Item は 1 件の TODO/FIXME を表す
 type Item struct {
 	Kind    string `json:"kind"` // TODO | FIXME | TODO|FIXME
 	Author  string `json:"author"`
 	Email   string `json:"email"`
-	Date    string `json:"date"`   // author date (iso-strict-local)
+	Date    string `json:"date"` // author date (iso-strict-local)
+	AgeDays int    `json:"age_days"`
 	Commit  string `json:"commit"` // full SHA
 	File    string `json:"file"`
 	Line    int    `json:"line"`
@@ -28,6 +31,7 @@ type Options struct {
 	AuthorRegex  string
 	WithComment  bool
 	WithMessage  bool
+	WithAge      bool
 	TruncAll     int
 	TruncComment int
 	TruncMessage int
@@ -35,6 +39,7 @@ type Options struct {
 	Jobs         int
 	RepoDir      string
 	Progress     bool
+	Now          time.Time
 }
 
 // Result は出力

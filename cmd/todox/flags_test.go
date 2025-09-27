@@ -95,6 +95,25 @@ func TestHelpOutputJapanese(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsWithAgeとSort(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--with-age", "--sort", "-age"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if !cfg.opts.WithAge {
+		t.Fatalf("WithAge should be enabled")
+	}
+	if cfg.sortKey != "-age" {
+		t.Fatalf("sortKey should be -age: got %q", cfg.sortKey)
+	}
+}
+
+func TestParseScanArgsUnsupportedSortはエラー(t *testing.T) {
+	if _, err := parseScanArgs([]string{"--sort", "age"}, "en"); err == nil {
+		t.Fatal("unsupported sort key should produce error")
+	}
+}
+
 func runTodox(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)

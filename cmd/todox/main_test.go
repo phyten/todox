@@ -41,6 +41,50 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	}
 }
 
+func TestPrintTSVWithAge列を追加する(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "TODO",
+			Author:  "A",
+			Email:   "a@example.com",
+			Date:    "2024-01-01",
+			AgeDays: 12,
+			File:    "main.go",
+			Line:    5,
+		}},
+	}
+
+	printTSV(res, engine.Options{WithAge: true})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("TSV出力の行数が不足しています: %q", string(out))
+	}
+	header := lines[0]
+	if !strings.Contains(header, "\tAGE") {
+		t.Fatalf("ヘッダーにAGE列が挿入されていません: %q", header)
+	}
+	if strings.Index(header, "DATE") > strings.Index(header, "AGE") {
+		t.Fatalf("AGE列の位置がDATEより前になっています: %q", header)
+	}
+	if !strings.Contains(lines[1], "\t12\t") {
+		t.Fatalf("AGE列の値が出力されていません: %q", lines[1])
+	}
+}
+
 func TestPrintTSVはコメント改行を可視化して保持する(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -114,6 +158,59 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	}
 	if !strings.Contains(text, "1行目⏎2行目 継続3行目") {
 		t.Fatalf("制御文字が期待通りに置換されていません: %q", text)
+	}
+}
+
+func TestPrintTableWithAge列を追加する(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "FIXME",
+			Author:  "B",
+			Email:   "b@example.com",
+			Date:    "2024-02-01",
+			AgeDays: 7,
+			File:    "util.go",
+			Line:    20,
+		}},
+	}
+
+	printTable(res, engine.Options{WithAge: true})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "AGE") {
+		t.Fatalf("ヘッダーにAGE列がありません: %q", text)
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("テーブル出力の行数が不足しています: %q", text)
+	}
+	header := strings.Fields(lines[0])
+	idx := -1
+	for i, v := range header {
+		if v == "AGE" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("ヘッダーにAGE列が見つかりません: %v", header)
+	}
+	row := strings.Fields(lines[1])
+	if len(row) <= idx || row[idx] != "7" {
+		t.Fatalf("AGE列の値が期待通りではありません: %v", row)
 	}
 }
 
@@ -202,6 +299,30 @@ func TestParseBoolParamは受け入れ値を解釈する(t *testing.T) {
 				t.Fatalf("結果が一致しません: got=%v want=%v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSortItemsByAge優先度(t *testing.T) {
+	items := []engine.Item{
+		{File: "b.go", Line: 10, AgeDays: 1},
+		{File: "a.go", Line: 5, AgeDays: 10},
+		{File: "a.go", Line: 3, AgeDays: 10},
+		{File: "c.go", Line: 1, AgeDays: 0},
+	}
+
+	sortItems(items, "-age")
+
+	if items[0].File != "a.go" || items[0].Line != 3 {
+		t.Fatalf("最古の項目が先頭ではありません: %+v", items[0])
+	}
+	if items[1].File != "a.go" || items[1].Line != 5 {
+		t.Fatalf("同じ日数のタイブレークが期待と異なります: %+v", items[1])
+	}
+	if items[2].File != "b.go" {
+		t.Fatalf("3番目の要素が期待と異なります: %+v", items[2])
+	}
+	if items[3].File != "c.go" {
+		t.Fatalf("末尾の項目が期待と異なります: %+v", items[3])
 	}
 }
 

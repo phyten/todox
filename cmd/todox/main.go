@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -33,6 +34,8 @@ type scanConfig struct {
 	output      string
 	withComment bool
 	withMessage bool
+	withAge     bool
+	sortKey     string
 	showHelp    bool
 	helpLang    string
 }
@@ -52,6 +55,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	output := fs.String("output", "table", "table|tsv|json")
 	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
+	withAge := fs.Bool("with-age", false, "show AGE column (days since author date)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
 	truncAll := fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
@@ -62,6 +66,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
 	lang := fs.String("lang", "", "help language (en|ja)")
 	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
+	sortKey := fs.String("sort", "", "sort key (supported: -age for descending age)")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
 
 	shortMap := map[string]string{
@@ -96,6 +101,10 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 			cfg.helpLang = "en"
 			helpLangSet = true
 		default:
+			if len(normalized) > 0 && normalized[len(normalized)-1] == "--sort" {
+				normalized = append(normalized, arg)
+				continue
+			}
 			if long, ok := shortMap[arg]; ok {
 				normalized = append(normalized, long)
 				continue
@@ -151,12 +160,19 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		cfg.helpLang = "en"
 	}
 
+	switch *sortKey {
+	case "", "-age":
+	default:
+		return cfg, fmt.Errorf("unsupported --sort value: %s", *sortKey)
+	}
+
 	cfg.opts = engine.Options{
 		Type:         *typ,
 		Mode:         *mode,
 		AuthorRegex:  *author,
 		WithComment:  *withComment,
 		WithMessage:  *withMessage,
+		WithAge:      *withAge,
 		TruncAll:     *truncAll,
 		TruncComment: *truncComment,
 		TruncMessage: *truncMessage,
@@ -168,6 +184,8 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.output = *output
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
+	cfg.withAge = *withAge
+	cfg.sortKey = *sortKey
 
 	return cfg, nil
 }
@@ -192,6 +210,8 @@ func scanCmd(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	sortItems(res.Items, cfg.sortKey)
 
 	switch strings.ToLower(cfg.output) {
 	case "json":
@@ -234,11 +254,13 @@ Search & attribution:
 
 Output:
   -o, --output {table|tsv|json}  Output format (default: table)
+      --sort {-age}              Sort items (currently: -age = oldest first)
 
 Extra columns (hidden by default):
       --full                     Show both COMMENT and MESSAGE columns
       --with-comment             Show COMMENT (line text trimmed to start at TODO/FIXME)
       --with-message             Show MESSAGE (commit subject = 1st line)
+      --with-age                 Show AGE (days since author date) column
       --with-snippet             Alias of --with-comment (backward compatible)
 
 Truncation (applies to COMMENT / MESSAGE only):
@@ -289,6 +311,9 @@ Examples:
 
   9) Include whitespace-only changes in blame:
        todox --no-ignore-ws
+
+ 10) Show AGE column and prioritize older TODO/FIXME first:
+       todox --with-age --sort -age
 `
 
 const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が書いたか」を特定するツール。
@@ -304,11 +329,13 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
 
 出力:
   -o, --output {table|tsv|json}  出力形式（既定: table）
+      --sort {-age}              並び替え（現在は -age のみ、古い順）
 
 追加カラム（既定は非表示）:
       --full                     COMMENT と MESSAGE を両方表示
       --with-comment             COMMENT（行テキスト。TODO/FIXME から表示）
       --with-message             MESSAGE（コミットメッセージの1行目）
+      --with-age                 AGE（日数）列を追加表示
       --with-snippet             --with-comment の別名（後方互換）
 
 トランケート（COMMENT/MESSAGE のみ対象）:
@@ -359,6 +386,9 @@ Examples:
 
   9) 空白変更も blame 対象にする:
        todox --no-ignore-ws
+
+ 10) AGE 列を表示し、古い順に並び替える:
+       todox --with-age --sort -age
 `
 
 const webAppHTML = `<!doctype html>
@@ -619,28 +649,34 @@ func parseIntParam(q map[string][]string, key string) (int, error) {
 	return n, nil
 }
 
-func printTSV(res *engine.Result, _ engine.Options) {
+func printTSV(res *engine.Result, opts engine.Options) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if opts.WithAge {
+		headers = append(headers, "AGE")
 	}
+	headers = append(headers, "COMMIT", "LOCATION")
+	if res.HasComment {
+		headers = append(headers, "COMMENT")
+	}
+	if res.HasMessage {
+		headers = append(headers, "MESSAGE")
+	}
+	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if opts.WithAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {
@@ -653,28 +689,34 @@ func printTSV(res *engine.Result, _ engine.Options) {
 	}
 }
 
-func printTable(res *engine.Result, _ engine.Options) {
+func printTable(res *engine.Result, opts engine.Options) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if opts.WithAge {
+		headers = append(headers, "AGE")
 	}
+	headers = append(headers, "COMMIT", "LOCATION")
+	if res.HasComment {
+		headers = append(headers, "COMMENT")
+	}
+	if res.HasMessage {
+		headers = append(headers, "MESSAGE")
+	}
+	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if opts.WithAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {
@@ -684,6 +726,21 @@ func printTable(res *engine.Result, _ engine.Options) {
 	}
 	if err := w.Flush(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func sortItems(items []engine.Item, key string) {
+	switch key {
+	case "-age":
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].AgeDays == items[j].AgeDays {
+				if items[i].File == items[j].File {
+					return items[i].Line < items[j].Line
+				}
+				return items[i].File < items[j].File
+			}
+			return items[i].AgeDays > items[j].AgeDays
+		})
 	}
 }
 

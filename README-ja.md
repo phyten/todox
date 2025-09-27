@@ -14,6 +14,7 @@
 - `--mode first`：その `TODO/FIXME` を**最初に導入**した人（`git log -L`）
 - フィルタ：`--author`, `--type {todo|fixme|both}`
 - 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--full`
+- 経過日数：`--with-age` で `AGE` 列（日数）を追加し、`--sort -age` で古い順に並び替え。JSON は常に `age_days` を含む
 - 文字数制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
 - 進捗表示：TTY のみ stderr に 1 行上書き（`--no-progress` あり）
@@ -61,6 +62,9 @@ make build
 # TSV / JSON で出力
 ./bin/todox --output tsv  > todo.tsv
 ./bin/todox --output json > todo.json
+
+# AGE 列を出して古い順に並び替え
+./bin/todox --with-age --sort -age
 ```
 
 ### Web モード
@@ -98,13 +102,19 @@ make build
 ### 出力形式
 
 - `-o, --output {table|tsv|json}` : 出力フォーマット（既定: table）
+- JSON 出力には `age_days` フィールドが常に含まれます（`--with-age` 不要）
 
 ### 追加列（非表示が既定）
 
 - `--with-comment` : TODO/FIXME 行を表示
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
+- `--with-age` : `AGE` 列（日数）を table / TSV に追加
 - `--full` : `--with-comment --with-message` のショートカット
+
+### ソート
+
+- `--sort -age` : 経過日数の降順（古い順）に並び替え
 
 ### 文字数制御
 

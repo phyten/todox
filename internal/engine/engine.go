@@ -34,6 +34,11 @@ type match struct {
 // 途中で発生したエラー情報は Result.Errors に集約されます。
 func Run(opts Options) (*Result, error) {
 	start := time.Now()
+	if opts.Now.IsZero() {
+		opts.Now = time.Now().UTC()
+	} else {
+		opts.Now = opts.Now.UTC()
+	}
 	if opts.Jobs <= 0 {
 		opts.Jobs = runtime.NumCPU()
 	}
@@ -216,11 +221,14 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 		it.Date = "(uncommitted)"
 		it.Commit = ""
 	} else {
-		a, e, d, s, err := commitMeta(ctx, opts.RepoDir, sha)
+		a, e, authorTime, d, s, err := commitMeta(ctx, opts.RepoDir, sha)
 		if err != nil {
 			errs = append(errs, newItemError(m.file, m.line, "git show", err))
 		}
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
+		if !authorTime.IsZero() {
+			it.AgeDays = ageInDays(opts.Now, authorTime)
+		}
 		if opts.WithMessage {
 			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
 		}
@@ -311,18 +319,22 @@ func firstCommitForLine(ctx context.Context, repo, file string, line int) (strin
 	return "", nil
 }
 
-func commitMeta(ctx context.Context, repo, sha string) (author, email, date, subject string, err error) {
-	cmd := exec.CommandContext(ctx, "git", "show", "-s", "--date=iso-strict-local", "--format=%an%x09%ae%x09%ad%x09%s", sha)
+func commitMeta(ctx context.Context, repo, sha string) (author, email string, authorTime time.Time, date, subject string, err error) {
+	cmd := exec.CommandContext(ctx, "git", "show", "-s", "--date=iso-strict-local", "--format=%an%x09%ae%x09%at%x09%ad%x09%s", sha)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
-		return "-", "-", "-", "-", fmt.Errorf("git show: %w", err)
+		return "-", "-", time.Time{}, "-", "-", fmt.Errorf("git show: %w", err)
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 4)
-	if len(parts) != 4 {
-		return "-", "-", "-", "-", fmt.Errorf("git show unexpected output: %q", strings.TrimSpace(string(out)))
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 5)
+	if len(parts) != 5 {
+		return "-", "-", time.Time{}, "-", "-", fmt.Errorf("git show unexpected output: %q", strings.TrimSpace(string(out)))
 	}
-	return parts[0], parts[1], parts[2], parts[3], nil
+	unixSeconds, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return "-", "-", time.Time{}, "-", "-", fmt.Errorf("git show invalid author time: %w", err)
+	}
+	return parts[0], parts[1], time.Unix(unixSeconds, 0).UTC(), parts[3], parts[4], nil
 }
 
 func kindOf(text string) string {
@@ -388,6 +400,17 @@ func effectiveTrunc(specific, all int) int {
 		return specific
 	}
 	return all
+}
+
+func ageInDays(now, author time.Time) int {
+	if author.IsZero() {
+		return 0
+	}
+	diff := now.Sub(author)
+	if diff < 0 {
+		return 0
+	}
+	return int(diff.Hours() / 24)
 }
 
 func msSince(t time.Time) int64 { return time.Since(t).Milliseconds() }

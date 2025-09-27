@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBlameSHAコマンド引数(t *testing.T) {
@@ -96,15 +97,36 @@ func TestCommitMetaエラー時はプレースホルダーとエラーを返す(
 	ctx := context.Background()
 	repo := t.TempDir()
 
-	author, email, date, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	author, email, ts, date, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatalf("エラーが返される想定でした")
 	}
-	if author != "-" || email != "-" || date != "-" || subject != "-" {
-		t.Fatalf("エラー時のプレースホルダーが想定外です: %q %q %q %q", author, email, date, subject)
+	if author != "-" || email != "-" || !ts.IsZero() || date != "-" || subject != "-" {
+		t.Fatalf("エラー時のプレースホルダーが想定外です: %q %q %v %q %q", author, email, ts, date, subject)
 	}
 	if !strings.Contains(err.Error(), "git show") {
 		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
+	}
+}
+
+func TestAgeInDays計算(t *testing.T) {
+	base := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	cases := map[string]struct {
+		author time.Time
+		want   int
+	}{
+		"同日":     {author: time.Date(2024, 6, 10, 0, 0, 0, 0, time.UTC), want: 0},
+		"1日差":    {author: time.Date(2024, 6, 9, 12, 0, 0, 0, time.UTC), want: 1},
+		"端数切り捨て": {author: time.Date(2024, 6, 9, 23, 59, 0, 0, time.UTC), want: 0},
+		"未来日は0":  {author: time.Date(2024, 6, 11, 0, 0, 0, 0, time.UTC), want: 0},
+	}
+	for name, tc := range cases {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			if got := ageInDays(base, tc.author); got != tc.want {
+				t.Fatalf("ageInDays結果が想定外です: got=%d want=%d", got, tc.want)
+			}
+		})
 	}
 }
 
