@@ -81,6 +81,19 @@ func TestParseScanArgsFullSetsDefaultTrunc(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsWithAgeAndSort(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--with-age", "--sort", "-age"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if !cfg.opts.WithAge {
+		t.Fatalf("WithAge flag should be true")
+	}
+	if cfg.sortKey != "-age" {
+		t.Fatalf("sortKey mismatch: got %q", cfg.sortKey)
+	}
+}
+
 func TestHelpOutputEnglish(t *testing.T) {
 	output := runTodox(t, "-h")
 	if !strings.Contains(output, "todox — Find who wrote TODO/FIXME") {

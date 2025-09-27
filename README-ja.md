@@ -13,7 +13,8 @@
 - `--mode last`（既定）：その行を**最後に変更**した人（`git blame`）
 - `--mode first`：その `TODO/FIXME` を**最初に導入**した人（`git log -L`）
 - フィルタ：`--author`, `--type {todo|fixme|both}`
-- 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--full`
+- 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--with-age`（日数）、`--full`
+- 並び替え：第一歩として `--sort -age`（古い順）
 - 文字数制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
 - 進捗表示：TTY のみ stderr に 1 行上書き（`--no-progress` あり）
@@ -57,6 +58,9 @@ make build
 
 # 作者名/メールで絞り込み（正規表現）
 ./bin/todox -a 'Alice|alice@example.com'
+
+# 古い TODO/FIXME を優先表示
+./bin/todox --with-age --sort -age
 
 # TSV / JSON で出力
 ./bin/todox --output tsv  > todo.tsv
@@ -104,6 +108,7 @@ make build
 - `--with-comment` : TODO/FIXME 行を表示
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
+- `--with-age` : AGE 列（日数）を表示
 - `--full` : `--with-comment --with-message` のショートカット
 
 ### 文字数制御
@@ -111,6 +116,10 @@ make build
 - `--truncate N` : COMMENT/MESSAGE を両方 N 文字に丸める（0 で無制限）
 - `--truncate-comment N` : COMMENT だけ丸める
 - `--truncate-message N` : MESSAGE だけ丸める
+
+### 並び替え
+
+- `--sort -age` : 古い TODO/FIXME を先頭に表示（同値は `file:line`）
 
 ### 進捗・ blame の振る舞い
 
@@ -170,7 +179,7 @@ Homebrew tap を自動更新したい場合は、事前に以下を準備して�
 
 ## ロードマップ（抜粋）
 
-- `--with-age`（AGE 列）と `--sort`, `--group-by`
+- ✅ 第一段階: `--with-age` と `--sort -age`（今後は grouping を予定）
 - リモート（GitHub/GitLab/Gitea）への行リンク生成
 - Markdown / CSV 出力、fzf/TUI、`-M/-C` での行移動検出
 - ファイル単位 blame の一括取得による高速化

@@ -10,7 +10,8 @@ identify **who introduced or last touched** those lines in seconds—either from
 - `--mode last` (default): show the **most recent author** of the line (`git blame`).
 - `--mode first`: show the **original author** who introduced the TODO/FIXME (`git log -L`).
 - Filtering options: `--author`, `--type {todo|fixme|both}`.
-- Extra columns: `--with-comment`, `--with-message`, `--full` (shortcut for both with truncation).
+- Extra columns: `--with-comment`, `--with-message`, `--with-age`, `--full` (shortcut for both with truncation).
+- Sorting: first step delivered with `--sort -age` (oldest TODO/FIXME first).
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
 - Output formats: `table`, `tsv`, `json`.
 - Progress bar: one-line TTY updates (disable with `--no-progress`).
@@ -56,6 +57,9 @@ make build
 
 # Filter by author name or email (regular expression)
 ./bin/todox -a 'Alice|alice@example.com'
+
+# Highlight the oldest TODO/FIXME entries
+./bin/todox --with-age --sort -age
 
 # Export as TSV or JSON
 ./bin/todox --output tsv  > todo.tsv
@@ -103,6 +107,7 @@ make build
 - `--with-comment`: include the TODO/FIXME line text
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
+- `--with-age`: show the AGE column (days since the recorded author date)
 - `--full`: shorthand for `--with-comment --with-message`
 
 ### Truncation controls
@@ -110,6 +115,10 @@ make build
 - `--truncate N`: truncate both COMMENT and MESSAGE to `N` characters (0 = unlimited)
 - `--truncate-comment N`: truncate only COMMENT
 - `--truncate-message N`: truncate only MESSAGE
+
+### Sorting
+
+- `--sort -age`: list oldest TODO/FIXME items first (ties fall back to `file:line`)
 
 ### Progress / blame behaviour
 
@@ -168,7 +177,7 @@ To update a Homebrew tap automatically, prepare:
 
 ## Roadmap (highlights)
 
-- `--with-age` column plus sorting / grouping options
+- ✅ First milestone: `--with-age` column with `--sort -age` (grouping options still planned)
 - Deep links to remote hosts (GitHub / GitLab / Gitea)
 - Additional outputs (Markdown, CSV), fzf/TUI integration, detection of moved lines via `-M/-C`
 - Faster scans by batching file-level blame queries

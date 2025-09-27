@@ -117,6 +117,72 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	}
 }
 
+func TestPrintTSVはAGE列を追加できる(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{Kind: "TODO", Author: "Age", Email: "age@example.com", Date: "2024-01-01", AgeDays: 42, File: "main.go", Line: 12}},
+	}
+
+	printTSV(res, engine.Options{WithAge: true})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "AGE") {
+		t.Fatalf("AGEヘッダーが含まれていません: %q", text)
+	}
+	if !strings.Contains(text, "\t42\t") {
+		t.Fatalf("AGE値が期待通りではありません: %q", text)
+	}
+}
+
+func TestPrintTableはAGE列を追加できる(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{Kind: "FIXME", Author: "Age", Email: "age@example.com", Date: "2024-01-02", AgeDays: 7, File: "main.go", Line: 5}},
+	}
+
+	printTable(res, engine.Options{WithAge: true})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "AGE") {
+		t.Fatalf("AGEヘッダーが含まれていません: %q", text)
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("行数が不足しています: %q", text)
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 6 {
+		t.Fatalf("列数が不足しています: %q", lines[1])
+	}
+	if fields[4] != "7" {
+		t.Fatalf("AGE列の値が期待と異なります: got=%q line=%q", fields[4], lines[1])
+	}
+}
+
 func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -151,6 +217,38 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 	}
 	if !strings.Contains(text, "(unknown location) [git] mystery") {
 		t.Fatalf("不明位置の行が期待通りではありません: %q", text)
+	}
+}
+
+func TestApplySortAge(t *testing.T) {
+	items := []engine.Item{
+		{File: "b.go", Line: 10, AgeDays: 2},
+		{File: "a.go", Line: 1, AgeDays: 5},
+		{File: "a.go", Line: 2, AgeDays: 5},
+		{File: "c.go", Line: 3, AgeDays: 0},
+	}
+
+	if err := applySort(items, "-age"); err != nil {
+		t.Fatalf("applySort returned error: %v", err)
+	}
+
+	want := []engine.Item{
+		{File: "a.go", Line: 1, AgeDays: 5},
+		{File: "a.go", Line: 2, AgeDays: 5},
+		{File: "b.go", Line: 10, AgeDays: 2},
+		{File: "c.go", Line: 3, AgeDays: 0},
+	}
+
+	for i := range want {
+		if items[i].File != want[i].File || items[i].Line != want[i].Line || items[i].AgeDays != want[i].AgeDays {
+			t.Fatalf("並び順が想定外です: got=%v want=%v", items, want)
+		}
+	}
+}
+
+func TestApplySortInvalidKey(t *testing.T) {
+	if err := applySort(nil, "age"); err == nil {
+		t.Fatalf("未知のキーはエラーとすべきです")
 	}
 }
 

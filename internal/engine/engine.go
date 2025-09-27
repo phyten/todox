@@ -34,6 +34,11 @@ type match struct {
 // 途中で発生したエラー情報は Result.Errors に集約されます。
 func Run(opts Options) (*Result, error) {
 	start := time.Now()
+	if opts.Now.IsZero() {
+		opts.Now = time.Now().UTC()
+	} else {
+		opts.Now = opts.Now.UTC()
+	}
 	if opts.Jobs <= 0 {
 		opts.Jobs = runtime.NumCPU()
 	}
@@ -221,6 +226,9 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 			errs = append(errs, newItemError(m.file, m.line, "git show", err))
 		}
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
+		if t, err := time.Parse(time.RFC3339, it.Date); err == nil {
+			it.AgeDays = ageDays(opts.Now, t)
+		}
 		if opts.WithMessage {
 			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
 		}
@@ -391,3 +399,16 @@ func effectiveTrunc(specific, all int) int {
 }
 
 func msSince(t time.Time) int64 { return time.Since(t).Milliseconds() }
+
+func ageDays(now, author time.Time) int {
+	if now.IsZero() || author.IsZero() {
+		return 0
+	}
+	now = now.UTC()
+	author = author.UTC()
+	if now.Before(author) {
+		return 0
+	}
+	const day = 24 * time.Hour
+	return int(now.Sub(author) / day)
+}

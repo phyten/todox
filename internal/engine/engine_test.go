@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBlameSHAコマンド引数(t *testing.T) {
@@ -191,6 +192,28 @@ func TestNewItemErrorメッセージ整形(t *testing.T) {
 	fallback := newItemError("file.go", 20, "stage", emptyErr)
 	if fallback.Message != "unknown error" {
 		t.Fatalf("空メッセージの場合は既定文言を利用すべきです: got=%q", fallback.Message)
+	}
+}
+
+func TestAgeDays計算(t *testing.T) {
+	now := time.Date(2024, time.July, 20, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		author time.Time
+		want   int
+	}{
+		{name: "同日", author: time.Date(2024, time.July, 20, 0, 0, 0, 0, time.UTC), want: 0},
+		{name: "1日未満", author: time.Date(2024, time.July, 20, 11, 0, 0, 0, time.UTC), want: 0},
+		{name: "3日超", author: time.Date(2024, time.July, 17, 11, 59, 59, 0, time.UTC), want: 3},
+		{name: "未来日時", author: time.Date(2024, time.July, 21, 0, 0, 0, 0, time.UTC), want: 0},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ageDays(now, tc.author); got != tc.want {
+				t.Fatalf("ageDaysの計算結果が想定外です: got=%d want=%d", got, tc.want)
+			}
+		})
 	}
 }
 
