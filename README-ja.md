@@ -89,16 +89,42 @@ make build
 
 ## CLI オプション（抜粋）
 
-- `--type {todo|fixme|both}` : 対象タグ（既定: both）
-- `--mode {last|first}` : 作者の定義（既定: last）
-- `--author REGEX` : 作者名/メールの正規表現フィルタ
-- `--with-comment` / `--with-message` / `--full`
-- `--truncate N` / `--truncate-comment N` / `--truncate-message N`
-- `--output {table|tsv|json}`
-- `--no-progress` / `--progress`
-- `--no-ignore-ws` : `git blame` に `-w` を付けない（空白変更も最新扱い）
+### 検索・作者判定
 
-ヘルプ：`./bin/todox -h`（英語/日本語切り替え対応）
+- `-t, --type {todo|fixme|both}` : スキャン対象（既定: both）
+- `-m, --mode {last|first}` : 作者の定義（既定: last）
+- `-a, --author REGEX` : 作者名/メールの正規表現フィルタ（拡張正規表現）
+
+### 出力形式
+
+- `-o, --output {table|tsv|json}` : 出力フォーマット（既定: table）
+
+### 追加列（非表示が既定）
+
+- `--with-comment` : TODO/FIXME 行を表示
+- `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
+- `--with-message` : コミットサマリ（1 行目）を表示
+- `--full` : `--with-comment --with-message` のショートカット
+
+### 文字数制御
+
+- `--truncate N` : COMMENT/MESSAGE を両方 N 文字に丸める（0 で無制限）
+- `--truncate-comment N` : COMMENT だけ丸める
+- `--truncate-message N` : MESSAGE だけ丸める
+
+### 進捗・ blame の振る舞い
+
+- `--no-progress` / `--progress` : 進捗表示を抑止／強制
+- `--no-ignore-ws` : `git blame` で `-w` を使わない（空白変更も最新扱い）
+
+### ヘルプ・言語設定
+
+- `-h, --help [en|ja]` : ヘルプを表示（既定は英語。`ja` で日本語）
+- `--help=ja`, `--help-ja` : ワンショットで日本語ヘルプを表示
+- `--lang {en|ja}` : 現在の実行に使うヘルプ言語を指定
+- `GTA_LANG=ja`（環境変数）: 既定ヘルプ言語を日本語に変更（`GIT_TODO_AUTHORS_LANG` も使用可）
+
+ヘルプ：`./bin/todox -h`（英語/日本語の両対応、例付き）
 
 ---
 

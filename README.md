@@ -88,16 +88,42 @@ make build
 
 ## CLI options (highlights)
 
-- `--type {todo|fixme|both}`: which markers to scan (default: both)
-- `--mode {last|first}`: author definition (default: last)
-- `--author REGEX`: filter by author name or email
-- `--with-comment` / `--with-message` / `--full`
-- `--truncate N` / `--truncate-comment N` / `--truncate-message N`
-- `--output {table|tsv|json}`
-- `--no-progress` / `--progress`
+### Search & attribution
+
+- `-t, --type {todo|fixme|both}`: which markers to scan (default: both)
+- `-m, --mode {last|first}`: author definition (default: last)
+- `-a, --author REGEX`: filter by author name or email (extended regex)
+
+### Output selection
+
+- `-o, --output {table|tsv|json}`: choose the output format (default: table)
+
+### Extra columns (hidden by default)
+
+- `--with-comment`: include the TODO/FIXME line text
+- `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
+- `--with-message`: include the commit subject (first line)
+- `--full`: shorthand for `--with-comment --with-message`
+
+### Truncation controls
+
+- `--truncate N`: truncate both COMMENT and MESSAGE to `N` characters (0 = unlimited)
+- `--truncate-comment N`: truncate only COMMENT
+- `--truncate-message N`: truncate only MESSAGE
+
+### Progress / blame behaviour
+
+- `--no-progress` / `--progress`: disable or force the progress display
 - `--no-ignore-ws`: run `git blame` without `-w` so whitespace-only edits are considered latest
 
-Full help: `./bin/todox -h` (bilingual output).
+### Help & language
+
+- `-h, --help [en|ja]`: show help (English by default, pass `ja` for Japanese)
+- `--help=ja`, `--help-ja`: convenient aliases to show Japanese help immediately
+- `--lang {en|ja}`: set the help language for the current invocation
+- `GTA_LANG=ja` (environment): default to Japanese help (`GIT_TODO_AUTHORS_LANG` also works)
+
+Full help: `./bin/todox -h` (bilingual output and examples).
 
 ---
 
