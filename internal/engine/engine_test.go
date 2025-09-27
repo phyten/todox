@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -189,5 +191,69 @@ func TestNewItemErrorメッセージ整形(t *testing.T) {
 	fallback := newItemError("file.go", 20, "stage", emptyErr)
 	if fallback.Message != "unknown error" {
 		t.Fatalf("空メッセージの場合は既定文言を利用すべきです: got=%q", fallback.Message)
+	}
+}
+
+func TestGitGrepHandlesLongLines(t *testing.T) {
+	repoDir := t.TempDir()
+
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "config", "user.name", "tester")
+	runGit(t, repoDir, "config", "user.email", "tester@example.com")
+
+	const testLongLineSize = 210_000
+	longTail := strings.Repeat("A", testLongLineSize)
+	content := "// TODO " + longTail + "\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "long.go"), []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	runGit(t, repoDir, "add", "long.go")
+	runGit(t, repoDir, "commit", "-m", "add long line")
+
+	matches, err := gitGrep(repoDir, "TODO")
+	if err != nil {
+		t.Fatalf("gitGrep returned error: %v", err)
+	}
+
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+
+	got := matches[0]
+	if got.file != "long.go" {
+		t.Fatalf("unexpected file: %s", got.file)
+	}
+
+	if got.line != 1 {
+		t.Fatalf("unexpected line: %d", got.line)
+	}
+
+	const todoPrefix = "// TODO "
+	if !strings.HasPrefix(got.text, todoPrefix) {
+		prefixLen := len(todoPrefix)
+		var gotPrefix string
+		if len(got.text) >= prefixLen {
+			gotPrefix = got.text[:prefixLen]
+		} else {
+			gotPrefix = got.text
+		}
+		t.Fatalf("match text missing prefix: %q", gotPrefix)
+	}
+
+	if len(got.text) != len(strings.TrimSuffix(content, "\n")) {
+		t.Fatalf("unexpected text length: got %d want %d", len(got.text), len(content)-1)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, stderr.String())
 	}
 }

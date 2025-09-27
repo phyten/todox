@@ -248,6 +248,8 @@ func gitGrep(repo, pattern string) ([]match, error) {
 	}
 	var res []match
 	sc := bufio.NewScanner(bytes.NewReader(out))
+	buf := make([]byte, 0, 1024*1024)
+	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
 		loc := reLine.FindStringIndex(line)
@@ -261,6 +263,9 @@ func gitGrep(repo, pattern string) ([]match, error) {
 		// normalize path to repo-relative
 		file = filepath.ToSlash(file)
 		res = append(res, match{file: file, line: n, text: text})
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("git grep scan: %w", err)
 	}
 	return res, nil
 }
