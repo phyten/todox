@@ -86,12 +86,14 @@ return true;
 	var locationHTML string
 	var errorCodeHTML string
 	var suspiciousCount int
+	var tdCount int
 
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(srv.URL),
 		chromedp.WaitVisible("#out", chromedp.ByQuery),
 		chromedp.Evaluate(fixtureScript, nil),
 		chromedp.WaitVisible("#out table", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('#out tbody tr:first-child td').length`, &tdCount),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('#out tbody tr td'), el => el.textContent)`, &cellTexts),
 		chromedp.Evaluate(`document.querySelector('#out tbody tr td:nth-child(7)').innerHTML`, &commentHTML),
 		chromedp.Evaluate(`document.querySelector('#out tbody tr td:nth-child(6)').innerHTML`, &locationHTML),
@@ -99,6 +101,10 @@ return true;
 		chromedp.Evaluate(`document.querySelectorAll('#out img, #out script').length`, &suspiciousCount),
 	); err != nil {
 		t.Fatalf("chromedpの実行に失敗しました: %v", err)
+	}
+
+	if tdCount != 8 {
+		t.Fatalf("1行目の列数が想定外です: %d", tdCount)
 	}
 
 	if len(cellTexts) != 8 {
