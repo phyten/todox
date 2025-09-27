@@ -453,46 +453,7 @@ function render(data){
 		_, _ = w.Write([]byte(html))
 	})
 
-	http.HandleFunc("/api/scan", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-
-		withComment, err := parseBoolParam(q, "with_comment")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		withMessage, err := parseBoolParam(q, "with_message")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		opts := engine.Options{
-			Type:         get(q, "type", "both"),
-			Mode:         get(q, "mode", "last"),
-			AuthorRegex:  q.Get("author"),
-			WithComment:  withComment,
-			WithMessage:  withMessage,
-			TruncAll:     atoi(q.Get("truncate")),
-			TruncComment: atoi(q.Get("truncate_comment")),
-			TruncMessage: atoi(q.Get("truncate_message")),
-			IgnoreWS:     true,
-			Jobs:         runtime.NumCPU(),
-			RepoDir:      *repo,
-			Progress:     false,
-		}
-		if opts.WithComment && opts.WithMessage &&
-			opts.TruncAll == 0 && opts.TruncComment == 0 && opts.TruncMessage == 0 {
-			opts.TruncAll = 120
-		}
-		res, err := engine.Run(opts)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(res)
-	})
+	http.HandleFunc("/api/scan", apiScanHandler(*repo))
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
@@ -526,9 +487,79 @@ func parseBoolParam(q map[string][]string, key string) (bool, error) {
 	}
 }
 
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
+func apiScanHandler(repoDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+
+		withComment, err := parseBoolParam(q, "with_comment")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		withMessage, err := parseBoolParam(q, "with_message")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		truncAll, err := parseIntParam(q, "truncate")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		truncComment, err := parseIntParam(q, "truncate_comment")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		truncMessage, err := parseIntParam(q, "truncate_message")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		opts := engine.Options{
+			Type:         get(q, "type", "both"),
+			Mode:         get(q, "mode", "last"),
+			AuthorRegex:  q.Get("author"),
+			WithComment:  withComment,
+			WithMessage:  withMessage,
+			TruncAll:     truncAll,
+			TruncComment: truncComment,
+			TruncMessage: truncMessage,
+			IgnoreWS:     true,
+			Jobs:         runtime.NumCPU(),
+			RepoDir:      repoDir,
+			Progress:     false,
+		}
+		if opts.WithComment && opts.WithMessage &&
+			opts.TruncAll == 0 && opts.TruncComment == 0 && opts.TruncMessage == 0 {
+			opts.TruncAll = 120
+		}
+		res, err := engine.Run(opts)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+	}
+}
+
+func parseIntParam(q map[string][]string, key string) (int, error) {
+	vals, ok := q[key]
+	if !ok || len(vals) == 0 {
+		return 0, nil
+	}
+	raw := strings.TrimSpace(vals[0])
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid value for %s: %q", key, raw)
+	}
+	return n, nil
 }
 
 func printTSV(res *engine.Result, _ engine.Options) {
