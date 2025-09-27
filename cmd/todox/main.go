@@ -557,7 +557,7 @@ func parseIntParam(q map[string][]string, key string) (int, error) {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, fmt.Errorf("invalid value for %s: %q", key, raw)
+		return 0, fmt.Errorf("invalid integer value for %s: %q", key, raw)
 	}
 	return n, nil
 }
