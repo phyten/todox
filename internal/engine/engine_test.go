@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBlameSHAコマンド引数(t *testing.T) {
@@ -96,12 +97,15 @@ func TestCommitMetaエラー時はプレースホルダーとエラーを返す(
 	ctx := context.Background()
 	repo := t.TempDir()
 
-	author, email, date, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	author, email, date, authorTime, subject, err := commitMeta(ctx, repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatalf("エラーが返される想定でした")
 	}
 	if author != "-" || email != "-" || date != "-" || subject != "-" {
 		t.Fatalf("エラー時のプレースホルダーが想定外です: %q %q %q %q", author, email, date, subject)
+	}
+	if !authorTime.IsZero() {
+		t.Fatalf("エラー時の著者日付はゼロ値の想定です: %v", authorTime)
 	}
 	if !strings.Contains(err.Error(), "git show") {
 		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
@@ -177,6 +181,21 @@ func TestEffectiveTrunc優先順位(t *testing.T) {
 		if got := effectiveTrunc(tc.specific, tc.all); got != tc.want {
 			t.Fatalf("effectiveTrunc(%d, %d) = %d, want %d", tc.specific, tc.all, got, tc.want)
 		}
+	}
+}
+
+func TestCalculateAgeDaysの切り捨てと下限(t *testing.T) {
+	author := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+	now := author.Add(72 * time.Hour).Add(3 * time.Hour)
+	if got := calculateAgeDays(now, author); got != 3 {
+		t.Fatalf("経過日数の切り捨てが期待と異なります: got=%d want=%d", got, 3)
+	}
+	future := author.Add(24 * time.Hour)
+	if got := calculateAgeDays(author, future); got != 0 {
+		t.Fatalf("未来日時は0であるべきです: got=%d", got)
+	}
+	if got := calculateAgeDays(time.Time{}, author); got != 0 {
+		t.Fatalf("ゼロ値nowは0であるべきです: got=%d", got)
 	}
 }
 

@@ -34,6 +34,12 @@ type match struct {
 // 途中で発生したエラー情報は Result.Errors に集約されます。
 func Run(opts Options) (*Result, error) {
 	start := time.Now()
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
 	if opts.Jobs <= 0 {
 		opts.Jobs = runtime.NumCPU()
 	}
@@ -99,7 +105,7 @@ func Run(opts Options) (*Result, error) {
 	worker := func() {
 		defer wg.Done()
 		for j := range jobs {
-			item, itemErrs := processOne(ctx, opts, j.m)
+			item, itemErrs := processOne(ctx, opts, now, j.m)
 			if len(itemErrs) > 0 {
 				errsMu.Lock()
 				errs = append(errs, itemErrs...)
@@ -177,7 +183,7 @@ func newItemError(file string, line int, stage string, err error) ItemError {
 	return ItemError{File: file, Line: line, Stage: stage, Message: msg}
 }
 
-func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) {
+func processOne(ctx context.Context, opts Options, now time.Time, m match) (Item, []ItemError) {
 	it := Item{
 		Kind: kindOf(m.text),
 		File: m.file,
@@ -216,11 +222,14 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 		it.Date = "(uncommitted)"
 		it.Commit = ""
 	} else {
-		a, e, d, s, err := commitMeta(ctx, opts.RepoDir, sha)
+		a, e, d, authorTime, s, err := commitMeta(ctx, opts.RepoDir, sha)
 		if err != nil {
 			errs = append(errs, newItemError(m.file, m.line, "git show", err))
 		}
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
+		if !authorTime.IsZero() {
+			it.AgeDays = calculateAgeDays(now, authorTime)
+		}
 		if opts.WithMessage {
 			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
 		}
@@ -311,18 +320,40 @@ func firstCommitForLine(ctx context.Context, repo, file string, line int) (strin
 	return "", nil
 }
 
-func commitMeta(ctx context.Context, repo, sha string) (author, email, date, subject string, err error) {
-	cmd := exec.CommandContext(ctx, "git", "show", "-s", "--date=iso-strict-local", "--format=%an%x09%ae%x09%ad%x09%s", sha)
+func commitMeta(ctx context.Context, repo, sha string) (author, email, date string, authorTime time.Time, subject string, err error) {
+	cmd := exec.CommandContext(ctx, "git", "show", "-s", "--date=iso-strict-local", "--format=%an%x09%ae%x09%ad%x09%at%x09%s", sha)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
-		return "-", "-", "-", "-", fmt.Errorf("git show: %w", err)
+		return "-", "-", "-", time.Time{}, "-", fmt.Errorf("git show: %w", err)
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 4)
-	if len(parts) != 4 {
-		return "-", "-", "-", "-", fmt.Errorf("git show unexpected output: %q", strings.TrimSpace(string(out)))
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 5)
+	if len(parts) != 5 {
+		return "-", "-", "-", time.Time{}, "-", fmt.Errorf("git show unexpected output: %q", strings.TrimSpace(string(out)))
 	}
-	return parts[0], parts[1], parts[2], parts[3], nil
+	ts, parseErr := strconv.ParseInt(parts[3], 10, 64)
+	if parseErr != nil {
+		return "-", "-", "-", time.Time{}, "-", fmt.Errorf("git show parse timestamp: %w", parseErr)
+	}
+	authorTime = time.Unix(ts, 0).UTC()
+	return parts[0], parts[1], parts[2], authorTime, parts[4], nil
+}
+
+func calculateAgeDays(now, author time.Time) int {
+	if now.IsZero() || author.IsZero() {
+		return 0
+	}
+	now = now.UTC()
+	author = author.UTC()
+	if now.Before(author) {
+		return 0
+	}
+	diff := now.Sub(author)
+	days := int(diff.Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days
 }
 
 func kindOf(text string) string {

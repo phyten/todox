@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	printTSV(res, engine.Options{})
+	printTSV(res, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -57,7 +58,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	printTSV(res, engine.Options{})
+	printTSV(res, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -74,6 +75,53 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 	}
 	if !strings.Contains(lines[1], "調査中⏎要確認") {
 		t.Fatalf("改行が可視文字に置換されていません: %q", lines[1])
+	}
+}
+
+func TestPrintTSVWithAge列を追加する(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "TODO",
+			Author:  "山田",
+			Email:   "yamada@example.com",
+			Date:    "2024-01-01",
+			AgeDays: 12,
+			Commit:  "1234567890abcdef",
+			File:    "main.go",
+			Line:    42,
+		}},
+	}
+
+	printTSV(res, true)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("出力行数が不足しています: %q", out)
+	}
+	header := strings.Split(lines[0], "\t")
+	wantHeader := []string{"TYPE", "AUTHOR", "EMAIL", "DATE", "AGE", "COMMIT", "LOCATION"}
+	if !reflect.DeepEqual(header, wantHeader) {
+		t.Fatalf("ヘッダーが想定外です: got=%v want=%v", header, wantHeader)
+	}
+	row := strings.Split(lines[1], "\t")
+	if len(row) != len(wantHeader) {
+		t.Fatalf("列数が一致しません: got=%d want=%d", len(row), len(wantHeader))
+	}
+	if row[4] != "12" {
+		t.Fatalf("AGE 列が期待通りではありません: %v", row)
 	}
 }
 
@@ -101,7 +149,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{})
+	printTable(res, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -114,6 +162,53 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	}
 	if !strings.Contains(text, "1行目⏎2行目 継続3行目") {
 		t.Fatalf("制御文字が期待通りに置換されていません: %q", text)
+	}
+}
+
+func TestPrintTableWithAge列を追加する(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "FIXME",
+			Author:  "田中",
+			Email:   "tanaka@example.com",
+			Date:    "2024-03-01",
+			AgeDays: 5,
+			Commit:  "abcdef1234567890",
+			File:    "handler.go",
+			Line:    99,
+		}},
+	}
+
+	printTable(res, true)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("出力行数が不足しています: %q", out)
+	}
+	header := strings.Fields(lines[0])
+	wantHeader := []string{"TYPE", "AUTHOR", "EMAIL", "DATE", "AGE", "COMMIT", "LOCATION"}
+	if !reflect.DeepEqual(header, wantHeader) {
+		t.Fatalf("ヘッダーが想定外です: got=%v want=%v", header, wantHeader)
+	}
+	row := strings.Fields(lines[1])
+	if len(row) != len(wantHeader) {
+		t.Fatalf("列数が一致しません: got=%d want=%d", len(row), len(wantHeader))
+	}
+	if row[4] != "5" {
+		t.Fatalf("AGE 列が期待通りではありません: %v", row)
 	}
 }
 

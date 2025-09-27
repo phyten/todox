@@ -10,7 +10,8 @@ identify **who introduced or last touched** those lines in seconds—either from
 - `--mode last` (default): show the **most recent author** of the line (`git blame`).
 - `--mode first`: show the **original author** who introduced the TODO/FIXME (`git log -L`).
 - Filtering options: `--author`, `--type {todo|fixme|both}`.
-- Extra columns: `--with-comment`, `--with-message`, `--full` (shortcut for both with truncation).
+- Extra columns: `--with-comment`, `--with-message`, `--full` (shortcut for both with truncation), plus `--with-age` for table/tsv (JSON always includes `age_days`).
+- Sorting: `--sort -age` to prioritise the oldest findings.
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
 - Output formats: `table`, `tsv`, `json`.
 - Progress bar: one-line TTY updates (disable with `--no-progress`).
@@ -56,6 +57,9 @@ make build
 
 # Filter by author name or email (regular expression)
 ./bin/todox -a 'Alice|alice@example.com'
+
+# Surface the oldest TODO/FIXME entries with an AGE column
+./bin/todox --with-age --sort -age
 
 # Export as TSV or JSON
 ./bin/todox --output tsv  > todo.tsv
@@ -104,6 +108,11 @@ make build
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
 - `--full`: shorthand for `--with-comment --with-message`
+- `--with-age`: append an AGE column (days since author date) in table/tsv output; JSON responses always include `age_days`
+
+### Sorting
+
+- `--sort -age`: list the oldest TODO/FIXME entries first (falls back to file:line for ties)
 
 ### Truncation controls
 

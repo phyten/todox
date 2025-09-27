@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -33,6 +35,8 @@ type scanConfig struct {
 	output      string
 	withComment bool
 	withMessage bool
+	withAge     bool
+	sortKey     string
 	showHelp    bool
 	helpLang    string
 }
@@ -54,6 +58,8 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
+	withAge := fs.Bool("with-age", false, "show AGE (days since author date) column in table/tsv output")
+	sortKey := fs.String("sort", "", "sort order (currently supports -age)")
 	truncAll := fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
 	truncComment := fs.Int("truncate-comment", 0, "truncate comment only (0=unlimited)")
 	truncMessage := fs.Int("truncate-message", 0, "truncate message only (0=unlimited)")
@@ -71,10 +77,30 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		"-o": "--output",
 	}
 
+	takesValue := map[string]bool{
+		"--type":             true,
+		"--mode":             true,
+		"--author":           true,
+		"--output":           true,
+		"--truncate":         true,
+		"--truncate-comment": true,
+		"--truncate-message": true,
+		"--lang":             true,
+		"--jobs":             true,
+		"--repo":             true,
+		"--sort":             true,
+	}
+
 	normalized := make([]string, 0, len(args))
 	helpLangSet := false
+	expectValue := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if expectValue != "" {
+			normalized = append(normalized, arg)
+			expectValue = ""
+			continue
+		}
 		switch {
 		case arg == "-h" || arg == "--help":
 			cfg.showHelp = true
@@ -98,6 +124,9 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		default:
 			if long, ok := shortMap[arg]; ok {
 				normalized = append(normalized, long)
+				if takesValue[long] {
+					expectValue = long
+				}
 				continue
 			}
 			matched := false
@@ -109,6 +138,9 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 				}
 				if strings.HasPrefix(arg, short) && len(arg) > len(short) {
 					normalized = append(normalized, long, arg[len(short):])
+					if takesValue[long] {
+						expectValue = ""
+					}
 					matched = true
 					break
 				}
@@ -117,6 +149,9 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 				continue
 			}
 			normalized = append(normalized, arg)
+			if takesValue[arg] {
+				expectValue = arg
+			}
 		}
 	}
 
@@ -168,6 +203,8 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.output = *output
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
+	cfg.withAge = *withAge
+	cfg.sortKey = *sortKey
 
 	return cfg, nil
 }
@@ -193,6 +230,10 @@ func scanCmd(args []string) {
 		log.Fatal(err)
 	}
 
+	if err := applySort(res.Items, cfg.sortKey); err != nil {
+		log.Fatal(err)
+	}
+
 	switch strings.ToLower(cfg.output) {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -201,14 +242,36 @@ func scanCmd(args []string) {
 			log.Fatal(err)
 		}
 	case "tsv":
-		printTSV(res, cfg.opts)
+		printTSV(res, cfg.withAge)
 	default: // table
-		printTable(res, cfg.opts)
+		printTable(res, cfg.withAge)
 	}
 
 	if res.ErrorCount > 0 {
 		reportErrors(res)
 		os.Exit(2)
+	}
+}
+
+func applySort(items []engine.Item, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	switch key {
+	case "-age":
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].AgeDays == items[j].AgeDays {
+				if items[i].File == items[j].File {
+					return items[i].Line < items[j].Line
+				}
+				return items[i].File < items[j].File
+			}
+			return items[i].AgeDays > items[j].AgeDays
+		})
+		return nil
+	default:
+		return fmt.Errorf("unsupported --sort value: %s", key)
 	}
 }
 
@@ -240,6 +303,10 @@ Extra columns (hidden by default):
       --with-comment             Show COMMENT (line text trimmed to start at TODO/FIXME)
       --with-message             Show MESSAGE (commit subject = 1st line)
       --with-snippet             Alias of --with-comment (backward compatible)
+      --with-age                 Show AGE (days since author date) in table/tsv output
+
+Sorting:
+      --sort KEY                 Change ordering (first step: -age for oldest first)
 
 Truncation (applies to COMMENT / MESSAGE only):
       --truncate N               Truncate both to N chars (0 = unlimited)
@@ -310,6 +377,10 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --with-comment             COMMENT（行テキスト。TODO/FIXME から表示）
       --with-message             MESSAGE（コミットメッセージの1行目）
       --with-snippet             --with-comment の別名（後方互換）
+      --with-age                 AGE（著者日付からの経過日数）列を table / tsv に追加
+
+並び替え:
+      --sort KEY                 並び順を変更（第一歩: -age で古い順）
 
 トランケート（COMMENT/MESSAGE のみ対象）:
       --truncate N               両方を N 文字で切り詰め（0=無制限）
@@ -619,28 +690,34 @@ func parseIntParam(q map[string][]string, key string) (int, error) {
 	return n, nil
 }
 
-func printTSV(res *engine.Result, _ engine.Options) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
+func printTSV(res *engine.Result, withAge bool) {
+	w := bufio.NewWriter(os.Stdout)
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	header := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if withAge {
+		header = append(header, "AGE")
 	}
+	header = append(header, "COMMIT", "LOCATION")
+	if res.HasComment {
+		header = append(header, "COMMENT")
+	}
+	if res.HasMessage {
+		header = append(header, "MESSAGE")
+	}
+	write(strings.Join(header, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if withAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {
@@ -653,28 +730,34 @@ func printTSV(res *engine.Result, _ engine.Options) {
 	}
 }
 
-func printTable(res *engine.Result, _ engine.Options) {
+func printTable(res *engine.Result, withAge bool) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	if res.HasComment && res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT\tMESSAGE")
-	} else if res.HasComment {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tCOMMENT")
-	} else if res.HasMessage {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION\tMESSAGE")
-	} else {
-		write("TYPE\tAUTHOR\tEMAIL\tDATE\tCOMMIT\tLOCATION")
+	header := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
+	if withAge {
+		header = append(header, "AGE")
 	}
+	header = append(header, "COMMIT", "LOCATION")
+	if res.HasComment {
+		header = append(header, "COMMENT")
+	}
+	if res.HasMessage {
+		header = append(header, "MESSAGE")
+	}
+	write(strings.Join(header, "\t"))
 	for _, it := range res.Items {
 		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date, short(it.Commit), loc}
-		if res.HasComment && res.HasMessage {
-			base = append(base, it.Comment, it.Message)
-		} else if res.HasComment {
+		base := []string{it.Kind, it.Author, it.Email, it.Date}
+		if withAge {
+			base = append(base, strconv.Itoa(it.AgeDays))
+		}
+		base = append(base, short(it.Commit), loc)
+		if res.HasComment {
 			base = append(base, it.Comment)
-		} else if res.HasMessage {
+		}
+		if res.HasMessage {
 			base = append(base, it.Message)
 		}
 		for i := range base {
