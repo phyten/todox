@@ -368,7 +368,18 @@ func serveCmd(args []string) {
 	_ = fs.Parse(args)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		html := `<!doctype html>
+		serveIndexHTML(w)
+	})
+
+	http.HandleFunc("/api/scan", apiScanHandler(*repo))
+
+	addr := fmt.Sprintf(":%d", *port)
+	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
+	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+func serveIndexHTML(w http.ResponseWriter) {
+	html := `<!doctype html>
 <html><head><meta charset="utf-8"/><title>todox</title>
 <style>
 body{font:14px/1.45 system-ui, sans-serif; margin:20px;}
@@ -447,7 +458,14 @@ f.onsubmit=async (e)=>{
   showError(msg);
  }
 }
-function esc(s){return (s||'').replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function escText(s){
+ const map={'&':'&amp;','<':'&lt;','>':'&gt;'};
+ return (s??'').toString().replace(/[&<>]/g,c=>map[c]);
+}
+function escAttr(s){
+ const map={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'};
+ return (s??'').toString().replace(/[&<>"\']/g,c=>map[c]);
+}
 function render(data){
  const rows=data.items||[];
  const errs=data.errors||[];
@@ -455,10 +473,10 @@ function render(data){
  if(errs.length){
         let list='<ul>';
         for(const e of errs){
-                const file=e.file?esc(e.file):'(unknown)';
-                const line=e.line>0?e.line:'&mdash;';
-                const loc=file+':'+line;
-                list+='<li><code>'+loc+'</code> ['+esc(e.stage||'git')+'] '+esc(e.message||'')+'</li>';
+                const fileRaw=e.file||'(unknown)';
+                const lineRaw=e.line>0?String(e.line):'—';
+                const loc=fileRaw+':'+lineRaw;
+                list+='<li><code>'+escText(loc)+'</code> ['+escText(e.stage||'git')+'] '+escText(e.message||'')+'</li>';
         }
         list+='</ul>';
         parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
@@ -470,14 +488,19 @@ function render(data){
  let h='<table><thead><tr><th>TYPE</th><th>AUTHOR</th><th>EMAIL</th><th>DATE</th><th>COMMIT</th><th>LOCATION</th><th>COMMENT</th><th>MESSAGE</th></tr></thead><tbody>';
  for(const r of rows){
         h+='<tr>'+
-                '<td>'+esc(r.kind||'')+'</td>'+
-                '<td>'+esc(r.author||'')+'</td>'+
-                '<td>'+esc(r.email||'')+'</td>'+
-                '<td>'+esc(r.date||'')+'</td>'+
-                '<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
-                '<td><code>'+esc(r.file||'')+':'+(r.line||'')+'</code></td>'+
-                '<td>'+esc(r.comment||'')+'</td>'+
-                '<td>'+esc(r.message||'')+'</td>'+
+                '<td>'+escText(r.kind||'')+'</td>'+
+                '<td>'+escText(r.author||'')+'</td>'+
+                '<td>'+escText(r.email||'')+'</td>'+
+                '<td>'+escText(r.date||'')+'</td>'+
+                '<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>'+
+                (function(){
+                        const fileRaw=r.file??'';
+                        const lineRaw=r.line==null?'':String(r.line);
+                        const loc=fileRaw+':'+lineRaw;
+                        return '<td><code>'+escText(loc)+'</code></td>';
+                })()+
+                '<td>'+escText(r.comment||'')+'</td>'+
+                '<td>'+escText(r.message||'')+'</td>'+
                 '</tr>';
  }
  h+='</tbody></table>';
@@ -485,15 +508,10 @@ function render(data){
  return parts.join('');
 }
 </script></body></html>`
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
-	})
-
-	http.HandleFunc("/api/scan", apiScanHandler(*repo))
-
-	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
-	log.Fatal(http.ListenAndServe(addr, nil))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	_, _ = w.Write([]byte(html))
 }
 
 func get(q map[string][]string, k, def string) string {
