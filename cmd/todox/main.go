@@ -380,8 +380,14 @@ label{margin-right:12px}
 input[type=text]{width:240px}
 .small{color:#666}
 .errors{background:#fff4f4;border:1px solid #f2c6c6;padding:8px;margin:12px 0;}
+.error-banner{display:none;align-items:center;justify-content:space-between;background:#ffecec;border:1px solid #f5a9a9;color:#8a1f1f;padding:8px 12px;margin:12px 0;}
+.error-banner button{background:transparent;border:0;font-size:18px;line-height:1;cursor:pointer;color:inherit;padding:0;margin-left:12px;}
 </style></head><body>
 <h2>todox</h2>
+<div id="error-banner" class="error-banner" role="alert">
+ <span id="error-message"></span>
+ <button type="button" id="error-close" aria-label="Close">&times;</button>
+</div>
 <form id="f">
 <label>type:
 <select name="type">
@@ -404,12 +410,42 @@ input[type=text]{width:240px}
 <div id="out"></div>
 <script>
 const f=document.getElementById('f'), out=document.getElementById('out');
+const banner=document.getElementById('error-banner');
+const bannerMsg=document.getElementById('error-message');
+const bannerClose=document.getElementById('error-close');
+function showError(msg){
+ bannerMsg.textContent=msg;
+ banner.style.display='flex';
+}
+function hideError(){
+ banner.style.display='none';
+ bannerMsg.textContent='';
+}
+bannerClose.addEventListener('click',(e)=>{
+ e.preventDefault();
+ hideError();
+});
 f.onsubmit=async (e)=>{
  e.preventDefault();
- const q=new URLSearchParams(new FormData(f));
- const res=await fetch('/api/scan?'+q.toString());
- const data=await res.json();
- out.innerHTML=render(data);
+ hideError();
+ try{
+  const q=new URLSearchParams(new FormData(f));
+  const res=await fetch('/api/scan?'+q.toString());
+  if(!res.ok){
+   let msg='HTTP '+res.status;
+   if(res.statusText){msg+=' '+res.statusText;}
+   try{
+    const text=(await res.text()).trim();
+    if(text){msg+=': '+text;}
+   }catch(_){}
+   throw new Error(msg);
+  }
+  const data=await res.json();
+  out.innerHTML=render(data);
+ }catch(err){
+  const msg=err&&err.message?err.message:'予期しないエラーが発生しました';
+  showError(msg);
+ }
 }
 function esc(s){return (s||'').replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function render(data){
