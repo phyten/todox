@@ -228,8 +228,16 @@ func TestGitGrepHandlesLongLines(t *testing.T) {
 		t.Fatalf("unexpected line: %d", got.line)
 	}
 
-	if !strings.HasPrefix(got.text, "// TODO ") {
-		t.Fatalf("match text missing prefix: %q", got.text[:8])
+	const todoPrefix = "// TODO "
+	if !strings.HasPrefix(got.text, todoPrefix) {
+		prefixLen := len(todoPrefix)
+		var gotPrefix string
+		if len(got.text) >= prefixLen {
+			gotPrefix = got.text[:prefixLen]
+		} else {
+			gotPrefix = got.text
+		}
+		t.Fatalf("match text missing prefix: %q", gotPrefix)
 	}
 
 	if len(got.text) != len(strings.TrimSuffix(content, "\n")) {
