@@ -368,7 +368,21 @@ func serveCmd(args []string) {
 	_ = fs.Parse(args)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		html := `<!doctype html>
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		_, _ = io.WriteString(w, indexHTML())
+	})
+
+	http.HandleFunc("/api/scan", apiScanHandler(*repo))
+
+	addr := fmt.Sprintf(":%d", *port)
+	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
+	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+func indexHTML() string {
+	return `<!doctype html>
 <html><head><meta charset="utf-8"/><title>todox</title>
 <style>
 body{font:14px/1.45 system-ui, sans-serif; margin:20px;}
@@ -447,7 +461,9 @@ f.onsubmit=async (e)=>{
   showError(msg);
  }
 }
-function esc(s){return (s||'').replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function escText(s){return (s ?? '').toString().replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function escAttr(s){return (s ?? '').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',''':'&#39;'}[c]));}
+const esc=escText;
 function render(data){
  const rows=data.items||[];
  const errs=data.errors||[];
@@ -455,10 +471,10 @@ function render(data){
  if(errs.length){
         let list='<ul>';
         for(const e of errs){
-                const file=e.file?esc(e.file):'(unknown)';
-                const line=e.line>0?e.line:'&mdash;';
-                const loc=file+':'+line;
-                list+='<li><code>'+loc+'</code> ['+esc(e.stage||'git')+'] '+esc(e.message||'')+'</li>';
+                const fileRaw=e.file||'(unknown)';
+                const lineRaw=e.line>0?String(e.line):'—';
+                const loc=fileRaw+':'+lineRaw;
+                list+='<li><code>'+escText(loc)+'</code> ['+escText(e.stage||'git')+'] '+escText(e.message||'')+'</li>';
         }
         list+='</ul>';
         parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
@@ -475,7 +491,7 @@ function render(data){
                 '<td>'+esc(r.email||'')+'</td>'+
                 '<td>'+esc(r.date||'')+'</td>'+
                 '<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
-                '<td><code>'+esc(r.file||'')+':'+(r.line||'')+'</code></td>'+
+                '<td><code>'+escText((r.file??'')+':'+(r.line==null?'':String(r.line)))+'</code></td>'+
                 '<td>'+esc(r.comment||'')+'</td>'+
                 '<td>'+esc(r.message||'')+'</td>'+
                 '</tr>';
@@ -485,15 +501,6 @@ function render(data){
  return parts.join('');
 }
 </script></body></html>`
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
-	})
-
-	http.HandleFunc("/api/scan", apiScanHandler(*repo))
-
-	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
-	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 func get(q map[string][]string, k, def string) string {
