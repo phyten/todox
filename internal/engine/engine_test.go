@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -102,5 +103,91 @@ func TestCommitMetaエラー時はプレースホルダーとエラーを返す(
 	}
 	if !strings.Contains(err.Error(), "git show") {
 		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
+	}
+}
+
+func TestKindOf判定パターン(t *testing.T) {
+	cases := map[string]string{
+		"これは TODO のテスト":        "TODO",
+		"FIXME のみを含む":          "FIXME",
+		"両方 TODO と FIXME を含む":  "TODO|FIXME",
+		"どちらも含まない":             "UNKNOWN",
+		"小文字todoは対象外 FIXMEは検出": "FIXME",
+		"TODO と FIXME が同じ行にある": "TODO|FIXME",
+	}
+	for input, want := range cases {
+		if got := kindOf(input); got != want {
+			t.Fatalf("kindOf(%q) の結果が想定外です: got=%q want=%q", input, got, want)
+		}
+	}
+}
+
+func TestExtractCommentタイプごとに抽出(t *testing.T) {
+	const text = "prefix TODO something FIXME more"
+	cases := []struct {
+		name string
+		typ  string
+		want string
+	}{
+		{name: "TODO優先", typ: "todo", want: "TODO something FIXME more"},
+		{name: "FIXME優先", typ: "fixme", want: "FIXME more"},
+		{name: "両方デフォルトTODO", typ: "both", want: "TODO something FIXME more"},
+		{name: "不明タイプはTODO", typ: "", want: "TODO something FIXME more"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractComment(text, tc.typ); got != tc.want {
+				t.Fatalf("extractComment(%q, %q) = %q, want %q", text, tc.typ, got, tc.want)
+			}
+		})
+	}
+
+	const none = "コメント対象なし"
+	if got := extractComment(none, "todo"); got != none {
+		t.Fatalf("TODOが存在しない場合は元の文字列を返すべきです: got=%q want=%q", got, none)
+	}
+}
+
+func TestTruncateRunes多バイト文字と省略記号(t *testing.T) {
+	input := "あいうえお"
+	if got := truncateRunes(input, 0); got != input {
+		t.Fatalf("0指定の場合は元の文字列を返すべきです: got=%q want=%q", got, input)
+	}
+	if got := truncateRunes(input, 3); got != "あい…" {
+		t.Fatalf("多バイト文字の切り詰めが期待と異なります: got=%q want=%q", got, "あい…")
+	}
+	if got := truncateRunes("abc", 1); got != "…" {
+		t.Fatalf("1文字指定時は省略記号のみの想定です: got=%q", got)
+	}
+}
+
+func TestEffectiveTrunc優先順位(t *testing.T) {
+	cases := []struct {
+		specific int
+		all      int
+		want     int
+	}{
+		{specific: 80, all: 20, want: 80},
+		{specific: 0, all: 50, want: 50},
+		{specific: 0, all: 0, want: 0},
+	}
+	for _, tc := range cases {
+		if got := effectiveTrunc(tc.specific, tc.all); got != tc.want {
+			t.Fatalf("effectiveTrunc(%d, %d) = %d, want %d", tc.specific, tc.all, got, tc.want)
+		}
+	}
+}
+
+func TestNewItemErrorメッセージ整形(t *testing.T) {
+	err := errors.New("  failure happened  ")
+	item := newItemError("file.go", 10, "stage", err)
+	if item.Message != "failure happened" {
+		t.Fatalf("前後の空白を除去すべきです: got=%q", item.Message)
+	}
+
+	emptyErr := errors.New("")
+	fallback := newItemError("file.go", 20, "stage", emptyErr)
+	if fallback.Message != "unknown error" {
+		t.Fatalf("空メッセージの場合は既定文言を利用すべきです: got=%q", fallback.Message)
 	}
 }
