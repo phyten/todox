@@ -454,7 +454,6 @@ function escAttr(s){
   "'":'&#39;'
  }[c]));
 }
-const esc=escText;
 function render(data){
  const rows=data.items||[];
  const errs=data.errors||[];
@@ -477,11 +476,11 @@ function render(data){
  let h='<table><thead><tr><th>TYPE</th><th>AUTHOR</th><th>EMAIL</th><th>DATE</th><th>COMMIT</th><th>LOCATION</th><th>COMMENT</th><th>MESSAGE</th></tr></thead><tbody>';
  for(const r of rows){
         h+='<tr>'+
-                '<td>'+esc(r.kind||'')+'</td>'+
-                '<td>'+esc(r.author||'')+'</td>'+
-                '<td>'+esc(r.email||'')+'</td>'+
-                '<td>'+esc(r.date||'')+'</td>'+
-                '<td><code>'+esc((r.commit||'').slice(0,8))+'</code></td>'+
+                '<td>'+escText(r.kind||'')+'</td>'+
+                '<td>'+escText(r.author||'')+'</td>'+
+                '<td>'+escText(r.email||'')+'</td>'+
+                '<td>'+escText(r.date||'')+'</td>'+
+                '<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>'+
                 (()=>{
                         const fileValue=r.file;
                         const fileRaw=fileValue==null?'':String(fileValue);
@@ -490,10 +489,10 @@ function render(data){
                         const loc=fileRaw+':'+lineRaw;
                         return '<td><code>'+escText(loc)+'</code></td>';
                 })()+
-                '<td>'+esc(r.comment||'')+'</td>'+
-                '<td>'+esc(r.message||'')+'</td>'+
+                '<td>'+escText(r.comment||'')+'</td>'+
+                '<td>'+escText(r.message||'')+'</td>'+
                 '</tr>';
- }
+}
  h+='</tbody></table>';
  parts.push(h);
  return parts.join('');
