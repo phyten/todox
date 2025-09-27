@@ -556,7 +556,7 @@ func printTSV(res *engine.Result, _ engine.Options) {
 			base = append(base, it.Message)
 		}
 		for i := range base {
-			base[i] = sanitizeTSVField(base[i])
+			base[i] = sanitizeField(base[i])
 		}
 		write(strings.Join(base, "\t"))
 	}
@@ -589,6 +589,9 @@ func printTable(res *engine.Result, _ engine.Options) {
 		} else if res.HasMessage {
 			base = append(base, it.Message)
 		}
+		for i := range base {
+			base[i] = sanitizeField(base[i])
+		}
 		write(strings.Join(base, "\t"))
 	}
 	if err := w.Flush(); err != nil {
@@ -609,10 +612,10 @@ func short(s string) string {
 	return s
 }
 
-func sanitizeTSVField(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
-	s = strings.ReplaceAll(s, "\n", " ")
+func sanitizeField(s string) string {
+	const newlineMark = "⏎"
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", newlineMark)
 	s = strings.ReplaceAll(s, "\t", " ")
 	return s
 }
