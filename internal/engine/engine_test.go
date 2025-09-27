@@ -104,3 +104,103 @@ func TestCommitMetaエラー時はプレースホルダーとエラーを返す(
 		t.Fatalf("エラーメッセージにコマンド名が含まれていません: %v", err)
 	}
 }
+
+func TestKindOfテキスト種別を判定できる(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"TODOのみ":   {input: "// TODO: write tests", want: "TODO"},
+		"FIXMEのみ":  {input: "# FIXME: fix bug", want: "FIXME"},
+		"両方含む":     {input: "// TODO and FIXME", want: "TODO|FIXME"},
+		"どちらも含まない": {input: "// nothing", want: "UNKNOWN"},
+	}
+
+	for name, tt := range tests {
+		tt := tt
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := kindOf(tt.input); got != tt.want {
+				t.Fatalf("種別が一致しません: got=%s want=%s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractComment指定タイプで抽出できる(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		typ  string
+		want string
+	}{
+		{name: "TODO指定", text: "prefix TODO: something", typ: "todo", want: "TODO: something"},
+		{name: "FIXME指定", text: "prefix FIXME: fix", typ: "fixme", want: "FIXME: fix"},
+		{name: "両方で先に出た方", text: "NOTE FIXME before TODO", typ: "", want: "FIXME before TODO"},
+		{name: "対象がない場合は原文", text: "no markers", typ: "todo", want: "no markers"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := extractComment(tt.text, tt.typ); got != tt.want {
+				t.Fatalf("コメント抽出結果が一致しません: got=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateRunesマルチバイト文字も考慮する(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		n     int
+		want  string
+	}{
+		{name: "制限なし", input: "あいうえお", n: 0, want: "あいうえお"},
+		{name: "十分長い", input: "hello", n: 10, want: "hello"},
+		{name: "途中で切り詰め", input: "あいうえお", n: 3, want: "あい…"},
+		{name: "最小値", input: "example", n: 1, want: "…"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := truncateRunes(tt.input, tt.n); got != tt.want {
+				t.Fatalf("切り詰め結果が一致しません: got=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveTrunc優先度(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		specific int
+		all      int
+		want     int
+	}{
+		{name: "個別指定を優先", specific: 5, all: 20, want: 5},
+		{name: "個別指定が0なら全体", specific: 0, all: 15, want: 15},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveTrunc(tt.specific, tt.all); got != tt.want {
+				t.Fatalf("切り詰め長が一致しません: got=%d want=%d", got, tt.want)
+			}
+		})
+	}
+}
