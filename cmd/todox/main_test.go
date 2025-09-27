@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -200,5 +202,66 @@ func TestParseBoolParamは受け入れ値を解釈する(t *testing.T) {
 				t.Fatalf("結果が一致しません: got=%v want=%v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseIntParamは整数入力を検証する(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		value   string
+		want    int
+		wantErr bool
+	}{
+		"未指定は0":   {want: 0},
+		"空文字は0":   {value: "", want: 0},
+		"空白だけは0":  {value: "   ", want: 0},
+		"正の数":     {value: "120", want: 120},
+		"負の数も許容":  {value: "-1", want: -1},
+		"無効値はエラー": {value: "abc", wantErr: true},
+	}
+
+	for name, tc := range cases {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			q := map[string][]string{}
+			if tc.value != "" || strings.Contains(name, "空文字") {
+				q["n"] = []string{tc.value}
+			}
+
+			got, err := parseIntParam(q, "n")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("エラーを期待しましたが nil でした")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("予期しないエラー: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("結果が一致しません: got=%d want=%d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPIScanHandlerは不正なtruncateで400を返す(t *testing.T) {
+	t.Parallel()
+
+	handler := apiScanHandler(".")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scan?truncate=abc", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "truncate") {
+		t.Fatalf("エラーメッセージにキー名が含まれていません: %q", body)
 	}
 }
