@@ -28,7 +28,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	printTSV(res, engine.Options{})
+	printTSV(res, engine.Options{}, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -57,7 +57,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	printTSV(res, engine.Options{})
+	printTSV(res, engine.Options{}, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -101,7 +101,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{})
+	printTable(res, engine.Options{}, false)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -114,6 +114,100 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	}
 	if !strings.Contains(text, "1行目⏎2行目 継続3行目") {
 		t.Fatalf("制御文字が期待通りに置換されていません: %q", text)
+	}
+}
+
+func TestPrintTSVはAGE列を表示できる(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "TODO",
+			Author:  "Age Tester",
+			Email:   "age@example.com",
+			Date:    "2024-04-01",
+			AgeDays: 42,
+			Commit:  "1234567890abcdef",
+			File:    "main.go",
+			Line:    7,
+		}},
+	}
+
+	printTSV(res, engine.Options{}, true)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "AGE") {
+		t.Fatalf("AGE ヘッダーが含まれていません: %q", text)
+	}
+	if !strings.Contains(text, "\t42\t") {
+		t.Fatalf("AGE 列の値が期待通りではありません: %q", text)
+	}
+}
+
+func TestPrintTableはAGE列を表示できる(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:    "FIXME",
+			Author:  "Table Tester",
+			Email:   "table@example.com",
+			Date:    "2024-05-10",
+			AgeDays: 5,
+			Commit:  "abcdef0123456789",
+			File:    "handler.go",
+			Line:    12,
+		}},
+	}
+
+	printTable(res, engine.Options{}, true)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "AGE") {
+		t.Fatalf("AGE ヘッダーが含まれていません: %q", text)
+	}
+	if !strings.Contains(text, "  5    abcdef01") {
+		t.Fatalf("AGE 列の値が期待通りではありません: %q", text)
+	}
+}
+
+func TestSortItemsは年齢順に並び替える(t *testing.T) {
+	items := []engine.Item{
+		{AgeDays: 1, File: "b.go", Line: 30},
+		{AgeDays: 10, File: "a.go", Line: 20},
+		{AgeDays: 10, File: "a.go", Line: 10},
+		{AgeDays: 3, File: "c.go", Line: 5},
+	}
+
+	sortItems(items, "-age")
+
+	if items[0].Line != 10 || items[1].Line != 20 {
+		t.Fatalf("AGE 降順＋ファイル/行のタイブレークが期待通りではありません: %+v", items[:2])
+	}
+	if items[len(items)-1].AgeDays != 1 {
+		t.Fatalf("最も若い項目が末尾に来ていません: %+v", items)
 	}
 }
 
