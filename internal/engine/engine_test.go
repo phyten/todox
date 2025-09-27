@@ -201,7 +201,8 @@ func TestGitGrepHandlesLongLines(t *testing.T) {
 	runGit(t, repoDir, "config", "user.name", "tester")
 	runGit(t, repoDir, "config", "user.email", "tester@example.com")
 
-	longTail := strings.Repeat("A", 210_000)
+	const testLongLineSize = 210_000
+	longTail := strings.Repeat("A", testLongLineSize)
 	content := "// TODO " + longTail + "\n"
 	if err := os.WriteFile(filepath.Join(repoDir, "long.go"), []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
