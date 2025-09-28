@@ -104,6 +104,18 @@ func TestParseScanArgsFieldsFlag(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsRejectsInvalidType(t *testing.T) {
+	if _, err := parseScanArgs([]string{"--type", "unknown"}, "en"); err == nil {
+		t.Fatal("parseScanArgs should fail for invalid --type")
+	}
+}
+
+func TestParseScanArgsRejectsInvalidOutput(t *testing.T) {
+	if _, err := parseScanArgs([]string{"--output", "csv"}, "en"); err == nil {
+		t.Fatal("parseScanArgs should fail for invalid --output")
+	}
+}
+
 func TestHelpOutputEnglish(t *testing.T) {
 	output := runTodox(t, "-h")
 	if !strings.Contains(output, "todox — Find who wrote TODO/FIXME") {

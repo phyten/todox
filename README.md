@@ -104,6 +104,19 @@ make build
 
 > JSON output always includes an `age_days` field for each item.
 
+### Shared input rules (CLI & Web)
+
+Both the CLI flags and the `/api/scan` query parameters go through the same normalisation layer:
+
+| Parameter | Accepted values | Notes |
+|-----------|-----------------|-------|
+| Boolean toggles (`with_comment`, `with_message`, `with_age`, `ignore_ws`, etc.) | `1`, `0`, `true`, `false`, `yes`, `no`, `on`, `off` (case-insensitive) | Empty strings are ignored. |
+| `--type` / `type` | `todo`, `fixme`, `both` | Defaults to `both`. |
+| `--mode` / `mode` | `last`, `first` | Defaults to `last`. |
+| `--output` / `output` | `table`, `tsv`, `json` | Defaults to `table`. |
+| `--truncate*` / `truncate*` | `0` or greater integers | Negative numbers return an error. |
+| `--jobs` / `jobs` | Integers `1`–`64` | Values outside the range are rejected. |
+
 ### Extra columns (hidden by default)
 
 - `--with-comment`: include the TODO/FIXME line text

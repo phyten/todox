@@ -105,6 +105,19 @@ make build
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
 
+### 入力ルール（CLI / Web 共通）
+
+CLI フラグと `/api/scan` のクエリパラメータは同じ正規化レイヤで検証されます。
+
+| パラメータ | 受け入れ値 | 備考 |
+|-------------|-------------|------|
+| 真偽値トグル（`with_comment`, `with_message`, `with_age`, `ignore_ws` など） | `1`, `0`, `true`, `false`, `yes`, `no`, `on`, `off`（大文字小文字は不問） | 空文字は未指定として無視します。 |
+| `--type` / `type` | `todo`, `fixme`, `both` | 既定は `both`。 |
+| `--mode` / `mode` | `last`, `first` | 既定は `last`。 |
+| `--output` / `output` | `table`, `tsv`, `json` | 既定は `table`。 |
+| `--truncate*` / `truncate*` | 0 以上の整数 | 負の値はエラー。 |
+| `--jobs` / `jobs` | 1〜64 の整数 | 範囲外はエラー。 |
+
 ### 追加列（非表示が既定）
 
 - `--with-comment` : TODO/FIXME 行を表示
