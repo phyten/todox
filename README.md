@@ -100,6 +100,7 @@ make build
 ### Output selection
 
 - `-o, --output {table|tsv|json}`: choose the output format (default: table)
+- `--fields type,author,date,...`: choose the columns for table/TSV (comma separated; overrides `--with-*`)
 
 > JSON output always includes an `age_days` field for each item.
 
@@ -119,7 +120,8 @@ make build
 
 ### Sorting
 
-- `--sort -age`: prioritize the oldest TODO/FIXME items (fallback to file/line order)
+- `--sort key[,key...]`: multi-level sort. Prefix with `-` for descending, `+` (or nothing) for ascending.
+  Supported keys: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location` (`file,line`).
 
 ### Progress / blame behaviour
 
