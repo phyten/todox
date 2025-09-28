@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/example/todox/internal/util"
+	"github.com/phyten/todox/internal/util"
 )
 
 var reLine = regexp.MustCompile(`:(\d+):`) // first :<num>:

@@ -1,4 +1,4 @@
-module github.com/example/todox
+module github.com/phyten/todox
 
 go 1.22
 
