@@ -94,6 +94,37 @@ func TestParseScanArgsWithAgeAndSort(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsPathFilters(t *testing.T) {
+	args := []string{
+		"--path", "src,pkg",
+		"--path", "cmd",
+		"--exclude", "vendor/**",
+		"--exclude", "dist/**,node_modules/**",
+		"--path-regex", "^src/",
+		"--path-regex", `\.go$`,
+		"--exclude-typical",
+	}
+	cfg, err := parseScanArgs(args, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	wantPaths := []string{"src", "pkg", "cmd"}
+	if got := cfg.opts.Paths; !equalSlices(got, wantPaths) {
+		t.Fatalf("paths mismatch: got=%v want=%v", got, wantPaths)
+	}
+	wantExcludes := []string{"vendor/**", "dist/**", "node_modules/**"}
+	if got := cfg.opts.Excludes; !equalSlices(got, wantExcludes) {
+		t.Fatalf("excludes mismatch: got=%v want=%v", got, wantExcludes)
+	}
+	wantRegex := []string{"^src/", `\.go$`}
+	if got := cfg.opts.PathRegex; !equalSlices(got, wantRegex) {
+		t.Fatalf("path regex mismatch: got=%v want=%v", got, wantRegex)
+	}
+	if !cfg.opts.ExcludeTypical {
+		t.Fatal("exclude_typical should be true")
+	}
+}
+
 func TestParseScanArgsFieldsFlag(t *testing.T) {
 	cfg, err := parseScanArgs([]string{"--fields", "type,author,date"}, "en")
 	if err != nil {
@@ -121,6 +152,18 @@ func TestHelpOutputJapanese(t *testing.T) {
 	if !strings.Contains(output, "todox — リポジトリ内の TODO / FIXME") {
 		t.Fatalf("Japanese help output missing heading: %s", output)
 	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func runTodox(t *testing.T, args ...string) string {

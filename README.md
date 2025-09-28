@@ -72,7 +72,7 @@ make build
 # -> http://localhost:8080 (JSON API: /api/scan)
 ```
 
-The web form mirrors the server defaults: *ignore whitespace* starts checked (matching `ignore_ws=true`) and the *jobs* field is blank (auto). Those parameters are only sent when you explicitly change them, so leaving the defaults keeps the API behaviour unchanged.
+The web form mirrors the server defaults: *ignore whitespace* starts checked (matching `ignore_ws=true`) and the *jobs* field is blank (auto). The `path`, `exclude`, and `path_regex` inputs are sent only when non-empty, and the *exclude typical dirs* checkbox emits `exclude_typical=1` when checked. Leaving everything untouched keeps the API behaviour unchanged.
 
 ---
 
@@ -98,6 +98,13 @@ make build
 - `-t, --type {todo|fixme|both}`: which markers to scan (default: both)
 - `-m, --mode {last|first}`: author definition (default: last)
 - `-a, --author REGEX`: filter by author name or email (extended regex)
+
+### Path filtering
+
+- `--path LIST`: limit the `git grep` scope to the provided pathspec(s). Accepts comma-separated values and repeated flags.
+- `--exclude LIST`: exclude pathspecs/globs (comma-separated and repeatable). `:(exclude)` / `:!` prefixes are respected.
+- `--path-regex REGEXP`: keep only matches whose file path satisfies any of the given Go regular expressions.
+- `--exclude-typical`: enable the built-in exclude set (`vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`).
 
 ### Output selection
 
@@ -151,6 +158,10 @@ Both the CLI flags and the `/api/scan` query parameters share the same normaliza
 | `--mode`, `mode` | `last`, `first` | Unknown values are rejected. |
 | `--output` | `table`, `tsv`, `json` | Unknown values are rejected (CLI only). |
 | `--jobs`, `jobs` | Integers in `[1, 64]` | Values outside the range are rejected. |
+| `--path`, `path` | Pathspecs/globs, comma-separated or repeated | Values are trimmed. Empty entries are ignored. |
+| `--exclude`, `exclude` | Same as above | `:(exclude)` / `:!` prefixes are preserved; otherwise `:(glob,exclude)` is added internally. |
+| `--path-regex`, `path_regex` | Go regular expressions | Each entry must compile. Invalid patterns return an error. |
+| `--exclude-typical`, `exclude_typical` | Boolean (same literals as other flags) | Enables the built-in set: `vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`. |
 | `--truncate`, `--truncate-comment`, `--truncate-message` (and the API equivalents) | Integers ≥ 0 | Negative values are rejected. When both COMMENT and MESSAGE columns are enabled and no truncate is supplied, a default of 120 runes is applied. |
 
 Default for `jobs`: `min(runtime.NumCPU(), 64)` (number of CPU cores capped at 64).

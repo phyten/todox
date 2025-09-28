@@ -1,6 +1,9 @@
 package engine
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 // Item は 1 件の TODO/FIXME を表す
 type Item struct {
@@ -26,19 +29,24 @@ type ItemError struct {
 
 // Options は実行オプション
 type Options struct {
-	Type         string // todo|fixme|both
-	Mode         string // last|first
-	AuthorRegex  string
-	WithComment  bool
-	WithMessage  bool
-	TruncAll     int
-	TruncComment int
-	TruncMessage int
-	IgnoreWS     bool
-	Jobs         int
-	RepoDir      string
-	Progress     bool
-	Now          time.Time
+	Type              string // todo|fixme|both
+	Mode              string // last|first
+	AuthorRegex       string
+	WithComment       bool
+	WithMessage       bool
+	TruncAll          int
+	TruncComment      int
+	TruncMessage      int
+	IgnoreWS          bool
+	Jobs              int
+	RepoDir           string
+	Progress          bool
+	Now               time.Time
+	Paths             []string
+	Excludes          []string
+	PathRegex         []string
+	PathRegexCompiled []*regexp.Regexp
+	ExcludeTypical    bool
 }
 
 // Result は出力

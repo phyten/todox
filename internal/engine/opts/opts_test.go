@@ -2,6 +2,7 @@ package opts
 
 import (
 	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/phyten/todox/internal/engine"
@@ -91,6 +92,9 @@ func TestNormalizeAndValidate(t *testing.T) {
 		IgnoreWS:     true,
 		Jobs:         8,
 		RepoDir:      "",
+		Paths:        []string{" src ", ""},
+		Excludes:     []string{" vendor/** ", ""},
+		PathRegex:    []string{"^src/", ""},
 	}
 
 	if err := NormalizeAndValidate(&opts); err != nil {
@@ -108,6 +112,18 @@ func TestNormalizeAndValidate(t *testing.T) {
 	if opts.RepoDir != "." {
 		t.Fatalf("repo dir should default to '.' when empty: %q", opts.RepoDir)
 	}
+	if len(opts.Paths) != 1 || opts.Paths[0] != "src" {
+		t.Fatalf("paths should be trimmed: %#v", opts.Paths)
+	}
+	if len(opts.Excludes) != 1 || opts.Excludes[0] != "vendor/**" {
+		t.Fatalf("excludes should be trimmed: %#v", opts.Excludes)
+	}
+	if len(opts.PathRegex) != 1 || opts.PathRegex[0] != "^src/" {
+		t.Fatalf("path regex should be trimmed: %#v", opts.PathRegex)
+	}
+	if len(opts.PathRegexCompiled) != 1 || opts.PathRegexCompiled[0].String() != "^src/" {
+		t.Fatalf("compiled regex should mirror trimmed pattern: %#v", opts.PathRegexCompiled)
+	}
 
 	bad := engine.Options{Type: "unknown", Mode: "last", Jobs: 1}
 	if err := NormalizeAndValidate(&bad); err == nil {
@@ -122,6 +138,11 @@ func TestNormalizeAndValidate(t *testing.T) {
 	trunc := engine.Options{Type: "todo", Mode: "last", Jobs: 8, TruncComment: -1}
 	if err := NormalizeAndValidate(&trunc); err == nil {
 		t.Fatal("expected error for negative truncate")
+	}
+
+	invalidRegex := engine.Options{Type: "todo", Mode: "last", Jobs: 1, PathRegex: []string{"["}}
+	if err := NormalizeAndValidate(&invalidRegex); err == nil {
+		t.Fatal("expected error for invalid path regex")
 	}
 }
 
@@ -151,6 +172,14 @@ func TestApplyWebQueryToOptions(t *testing.T) {
 	q.Add("progress", "1")
 	q.Add("author", "Alice")
 	q.Add("author", " Bob ")
+	q.Add("path", "src,pkg")
+	q.Add("path", "cmd")
+	q.Add("exclude", "vendor/**,dist/**")
+	q.Add("exclude", " node_modules/** ")
+	q.Add("path_regex", "^src/")
+	q.Add("path_regex", "\\.go$")
+	q.Add("exclude_typical", "0")
+	q.Add("exclude_typical", "1")
 
 	got, err := ApplyWebQueryToOptions(base, q)
 	if err != nil {
@@ -185,6 +214,18 @@ func TestApplyWebQueryToOptions(t *testing.T) {
 	}
 	if got.AuthorRegex != "Bob" {
 		t.Fatalf("expected author to use last raw value, got %q", got.AuthorRegex)
+	}
+	if want := []string{"src", "pkg", "cmd"}; !reflect.DeepEqual(got.Paths, want) {
+		t.Fatalf("paths mismatch: got=%v want=%v", got.Paths, want)
+	}
+	if want := []string{"vendor/**", "dist/**", "node_modules/**"}; !reflect.DeepEqual(got.Excludes, want) {
+		t.Fatalf("excludes mismatch: got=%v want=%v", got.Excludes, want)
+	}
+	if want := []string{"^src/", "\\.go$"}; !reflect.DeepEqual(got.PathRegex, want) {
+		t.Fatalf("path regex mismatch: got=%v want=%v", got.PathRegex, want)
+	}
+	if !got.ExcludeTypical {
+		t.Fatal("exclude_typical should be true when last literal is truthy")
 	}
 
 	q.Set("with_comment", "maybe")

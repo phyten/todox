@@ -73,7 +73,7 @@ make build
 # -> http://localhost:8080 （API: /api/scan）
 ```
 
-Web フォームはサーバー既定に合わせています。`ignore whitespace` チェックは最初から ON（= `ignore_ws=true`）で、`jobs` 欄は空欄（自動）。既定のままならクエリに含めず、変更したときだけパラメータを送信します。
+Web フォームはサーバー既定に合わせています。`ignore whitespace` チェックは最初から ON（= `ignore_ws=true`）で、`jobs` 欄は空欄（自動）。`path` / `exclude` / `path_regex` の各テキスト欄は空のままなら送信されず、`exclude typical dirs` チェックを ON にしたときだけ `exclude_typical=1` を送信します。既定のままならクエリに含めません。
 
 ---
 
@@ -99,6 +99,13 @@ make build
 - `-t, --type {todo|fixme|both}` : スキャン対象（既定: both）
 - `-m, --mode {last|first}` : 作者の定義（既定: last）
 - `-a, --author REGEX` : 作者名/メールの正規表現フィルタ（拡張正規表現）
+
+### パスフィルタ
+
+- `--path LIST` : 指定した pathspec のみを対象に検索（カンマ区切り・繰り返し可能）
+- `--exclude LIST` : 指定した pathspec/glob を除外（カンマ区切り・繰り返し可能。`:(exclude)` や `:!` は尊重）
+- `--path-regex REGEXP` : ファイルパスに Go の正規表現を適用（OR 条件でいずれかにマッチすれば残す）
+- `--exclude-typical` : 典型的な除外セットをまとめて適用（`vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`）
 
 ### 出力形式
 
@@ -152,6 +159,10 @@ CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レ
 | `--mode`, `mode` | `last` / `first` | 未知の値はエラーになります。 |
 | `--output` | `table` / `tsv` / `json` | 未知の値はエラーになります（CLI のみ）。 |
 | `--jobs`, `jobs` | 1〜64 の整数 | 範囲外はエラーになります。 |
+| `--path`, `path` | pathspec / glob（カンマ区切り・繰り返し可） | 前後の空白は除去。空要素は無視します。 |
+| `--exclude`, `exclude` | 同上 | `:(exclude)` や `:!` で始まる場合はそのまま尊重し、そうでなければ内部的に `:(glob,exclude)` を付与します。 |
+| `--path-regex`, `path_regex` | Go の正規表現 | すべて事前にコンパイルし、不正なパターンは即エラーになります。 |
+| `--exclude-typical`, `exclude_typical` | 真偽値（他のフラグと同じリテラル） | 組み込みの除外セットを有効化（`vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`）。 |
 | `--truncate`, `--truncate-comment`, `--truncate-message`（および API 版） | 0 以上の整数 | 負の値はエラーになります。COMMENT と MESSAGE を両方表示し、トランケート指定が無い場合は既定で 120 文字が適用されます。 |
 
 `jobs` の既定値は `min(runtime.NumCPU(), 64)`（CPU コア数を 64 で上限）です。

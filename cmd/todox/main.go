@@ -39,6 +39,40 @@ type scanConfig struct {
 	helpLang    string
 }
 
+type multiFlag struct {
+	values []string
+}
+
+func (m *multiFlag) String() string {
+	if m == nil {
+		return ""
+	}
+	return strings.Join(m.values, ",")
+}
+
+func (m *multiFlag) Set(value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, piece := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(piece)
+		if trimmed == "" {
+			continue
+		}
+		m.values = append(m.values, trimmed)
+	}
+	return nil
+}
+
+func (m *multiFlag) Slice() []string {
+	if m == nil {
+		return nil
+	}
+	out := make([]string, len(m.values))
+	copy(out, m.values)
+	return out
+}
+
 func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg := scanConfig{helpLang: strings.ToLower(envLang)}
 	if cfg.helpLang == "" {
@@ -69,6 +103,13 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	jobsDefault := engineopts.Defaults(".").Jobs
 	jobs := fs.Int("jobs", jobsDefault, "max parallel workers")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
+	var paths multiFlag
+	var excludes multiFlag
+	var pathRegex multiFlag
+	fs.Var(&paths, "path", "limit search to given pathspec(s). repeatable / CSV")
+	fs.Var(&excludes, "exclude", "exclude pathspec/glob(s). repeatable / CSV")
+	fs.Var(&pathRegex, "path-regex", "post-filter files by Go regexp (OR). repeatable / CSV")
+	excludeTypical := fs.Bool("exclude-typical", false, "apply typical excludes (vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*)")
 
 	shortMap := map[string]string{
 		"-t": "--type",
@@ -170,6 +211,10 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.opts.Jobs = *jobs
 	cfg.opts.RepoDir = *repo
 	cfg.opts.Progress = util.ShouldShowProgress(*forceProg, *noProgress)
+	cfg.opts.Paths = paths.Slice()
+	cfg.opts.Excludes = excludes.Slice()
+	cfg.opts.PathRegex = pathRegex.Slice()
+	cfg.opts.ExcludeTypical = *excludeTypical
 
 	normalizedOutput, err := engineopts.NormalizeOutput(*output)
 	if err != nil {
@@ -266,6 +311,10 @@ Search & attribution:
   -m, --mode {last|first}        last: last modifier via blame (fast)
                                  first: first introducer via 'git log -L' (slow)
   -a, --author REGEX             Filter by author name or email (extended regex)
+      --path LIST               Limit search to pathspec(s) (repeatable / CSV)
+      --exclude LIST            Exclude pathspec/glob(s) (repeatable / CSV)
+      --path-regex REGEXP       Post-filter file paths by Go regexp (OR across entries)
+      --exclude-typical         Apply typical excludes: vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*
 
 Output:
   -o, --output {table|tsv|json}  Output format (default: table)
@@ -342,6 +391,10 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
   -m, --mode {last|first}        last : その行を最後に変更した人（git blame で高速）
                                  first: その TODO/FIXME を最初に入れた人（git log -L で低速）
   -a, --author REGEX             作者名またはメールを正規表現でフィルタ
+      --path LIST               検索対象の pathspec を指定（繰り返し/カンマ区切り）
+      --exclude LIST            除外する pathspec/glob（繰り返し/カンマ区切り）
+      --path-regex REGEXP       ファイルパスを Go の正規表現で後段フィルタ（OR 条件）
+      --exclude-typical         典型的な除外セットを適用（vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*）
 
 出力:
   -o, --output {table|tsv|json}  出力形式（既定: table）
@@ -441,9 +494,13 @@ input[type=text]{width:240px}
 	<option>first</option>
 </select></label>
 <label>author (regexp): <input name="author" type="text"></label>
+<label>path (CSV ok): <input name="path" type="text" placeholder="src,pkg"></label>
+<label>exclude (CSV ok): <input name="exclude" type="text" placeholder="vendor/**"></label>
+<label>path regex: <input name="path_regex" type="text" placeholder="\\.go$"></label>
 <label><input type="checkbox" name="with_comment"> comment</label>
 <label><input type="checkbox" name="with_message"> message</label>
 <label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
+<label><input type="checkbox" name="exclude_typical"> exclude typical dirs</label>
 <label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
 <label>truncate: <input type="text" name="truncate" value="120"></label>
 <button>Scan</button>
@@ -482,6 +539,35 @@ f.onsubmit=async (e)=>{
         q.delete('ignore_ws');
       }else{
         q.set('ignore_ws','0');
+      }
+    }
+  }
+
+  // trim CSV inputs and drop empties for path filters
+  for(const key of ['path','exclude','path_regex']){
+    const values=q.getAll(key);
+    q.delete(key);
+    const cleaned=[];
+    for(const value of values){
+      if(value==null){continue;}
+      for(const piece of String(value).split(',')){
+        const trimmed=piece.trim();
+        if(trimmed){cleaned.push(trimmed);}
+      }
+    }
+    for(const entry of cleaned){
+      q.append(key, entry);
+    }
+  }
+
+  // checkbox only when enabled
+  {
+    const el=f.elements.namedItem('exclude_typical');
+    if(el instanceof HTMLInputElement){
+      if(el.checked){
+        q.set('exclude_typical','1');
+      }else{
+        q.delete('exclude_typical');
       }
     }
   }
