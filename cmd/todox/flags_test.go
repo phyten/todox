@@ -103,6 +103,11 @@ func TestParseScanArgsFieldsFlag(t *testing.T) {
 		t.Fatalf("fields flag not captured: %q", cfg.fields)
 	}
 }
+func TestParseScanArgsRejectsInvalidOutput(t *testing.T) {
+	if _, err := parseScanArgs([]string{"--output", "csv"}, "en"); err == nil {
+		t.Fatal("expected error for invalid output value")
+	}
+}
 
 func TestHelpOutputEnglish(t *testing.T) {
 	output := runTodox(t, "-h")

@@ -138,6 +138,21 @@ make build
 
 ヘルプ：`./bin/todox -h`（英語/日本語の両対応、例付き）
 
+### 入力の正規化と検証（CLI / Web 共通）
+
+CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レイヤーで処理されます（特記がない限り、大文字小文字は区別しません）。
+
+| パラメータ | 受理する値 | 検証内容 |
+| --- | --- | --- |
+| 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`ignore_ws` など） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
+| `--type`, `type` | `todo` / `fixme` / `both` | 未知の値はエラーになります。 |
+| `--mode`, `mode` | `last` / `first` | 未知の値はエラーになります。 |
+| `--output` | `table` / `tsv` / `json` | 未知の値はエラーになります（CLI のみ）。 |
+| `--jobs`, `jobs` | 1〜64 の整数 | 範囲外はエラーになります。 |
+| `--truncate`, `--truncate-comment`, `--truncate-message`（および API 版） | 0 以上の整数 | 負の値はエラーになります。COMMENT と MESSAGE を両方表示し、トランケート指定が無い場合は既定で 120 文字が適用されます。 |
+
+`jobs` の既定値は `min(runtime.NumCPU(), 64)`（CPU コア数を 64 で上限）です。
+
 ---
 
 ## 注意・既知の制限
