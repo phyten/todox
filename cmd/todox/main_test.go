@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phyten/todox/internal/engine"
+	"github.com/phyten/todox/internal/textutil"
 )
 
 func TestPrintTSVは出力をフラッシュする(t *testing.T) {
@@ -221,6 +222,77 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	}
 	if !strings.Contains(text, "    5  abcdef01") {
 		t.Fatalf("AGE 列の値が期待通りではありません: %q", text)
+	}
+}
+
+func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{
+			{
+				Kind: "TODO", Author: "山田太郎", File: "サービス.go", Line: 12,
+			},
+			{
+				Kind: "TODO", Author: "Alice", File: "main.go", Line: 7,
+			},
+		},
+	}
+
+	sel, err := ResolveFields("type,author,location", false, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTable(res, sel)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("テーブル出力が想定外です: %q", string(out))
+	}
+
+	header := lines[0]
+	row1 := lines[1]
+	row2 := lines[2]
+
+	locHeaderIdx := strings.Index(header, "LOCATION")
+	if locHeaderIdx < 0 {
+		t.Fatalf("LOCATION ヘッダーが見つかりません: %q", header)
+	}
+	idx1 := strings.Index(row1, "サービス.go:12")
+	if idx1 < 0 {
+		t.Fatalf("全角データ列が見つかりません: %q", row1)
+	}
+	idx2 := strings.Index(row2, "main.go:7")
+	if idx2 < 0 {
+		t.Fatalf("半角データ列が見つかりません: %q", row2)
+	}
+
+	headerPrefixWidth := textutil.VisibleWidth(header[:locHeaderIdx])
+	row1PrefixWidth := textutil.VisibleWidth(row1[:idx1])
+	row2PrefixWidth := textutil.VisibleWidth(row2[:idx2])
+
+	if row1PrefixWidth != headerPrefixWidth {
+		t.Fatalf("全角行のロケーション列開始幅が揃っていません: got=%d want=%d", row1PrefixWidth, headerPrefixWidth)
+	}
+	if row2PrefixWidth != headerPrefixWidth {
+		t.Fatalf("半角行のロケーション列開始幅が揃っていません: got=%d want=%d", row2PrefixWidth, headerPrefixWidth)
+	}
+
+	if w1, w2 := textutil.VisibleWidth(row1), textutil.VisibleWidth(row2); w1 != w2 {
+		t.Fatalf("行全体の表示幅が一致しません: row1=%d row2=%d", w1, w2)
 	}
 }
 
