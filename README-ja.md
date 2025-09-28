@@ -101,6 +101,7 @@ make build
 ### 出力形式
 
 - `-o, --output {table|tsv|json}` : 出力フォーマット（既定: table）
+- `--fields type,author,date,...` : table/TSV の列順を指定（カンマ区切り。`--with-*` より優先）
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
 
@@ -120,7 +121,8 @@ make build
 
 ### 並び替え
 
-- `--sort -age` : 最も古い TODO/FIXME を優先表示（同値はファイル名+行番号で安定ソート）
+- `--sort key[,key...]` : 多段ソート。`-` で降順、`+`（または省略）で昇順を指定。
+  利用可能キー: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location`（`file,line`）。
 
 ### 進捗・ blame の振る舞い
 

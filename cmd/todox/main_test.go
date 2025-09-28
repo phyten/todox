@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +30,12 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	sel, err := ResolveFields("", true, true, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -57,7 +64,12 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	sel, err := ResolveFields("", true, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -101,7 +113,12 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, false)
+	sel, err := ResolveFields("", true, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTable(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -139,7 +156,14 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTSV(res, engine.Options{}, true)
+	sel, err := ResolveFields("", false, false, true)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	res.HasAge = sel.ShowAge
+
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -177,7 +201,14 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, true)
+	sel, err := ResolveFields("", false, false, true)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	res.HasAge = sel.ShowAge
+
+	printTable(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -193,7 +224,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	}
 }
 
-func TestSortItemsは年齢順に並び替える(t *testing.T) {
+func TestApplySortは年齢順に並び替える(t *testing.T) {
 	items := []engine.Item{
 		{AgeDays: 1, File: "b.go", Line: 30},
 		{AgeDays: 10, File: "a.go", Line: 20},
@@ -201,7 +232,12 @@ func TestSortItemsは年齢順に並び替える(t *testing.T) {
 		{AgeDays: 3, File: "c.go", Line: 5},
 	}
 
-	sortItems(items, "-age")
+	spec, err := ParseSortSpec("-age")
+	if err != nil {
+		t.Fatalf("ParseSortSpec failed: %v", err)
+	}
+
+	ApplySort(items, spec)
 
 	if items[0].Line != 10 || items[1].Line != 20 {
 		t.Fatalf("AGE 降順＋ファイル/行のタイブレークが期待通りではありません: %+v", items[:2])
@@ -357,5 +393,74 @@ func TestAPIScanHandlerは不正なtruncateで400を返す(t *testing.T) {
 	}
 	if body := rr.Body.String(); !strings.Contains(body, "truncate") {
 		t.Fatalf("エラーメッセージにキー名が含まれていません: %q", body)
+	}
+}
+
+func TestAPIScanHandlerは不正なsortで400を返す(t *testing.T) {
+	t.Parallel()
+
+	handler := apiScanHandler(".")
+	req := httptest.NewRequest(http.MethodGet, "/api/scan?sort=unknown", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "unknown") {
+		t.Fatalf("エラーメッセージが具体的ではありません: %q", body)
+	}
+}
+
+func TestAPIScanHandlerは不正なfieldsで400を返す(t *testing.T) {
+	t.Parallel()
+
+	handler := apiScanHandler(".")
+	req := httptest.NewRequest(http.MethodGet, "/api/scan?fields=foo", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "unknown field") {
+		t.Fatalf("エラーメッセージが期待通りではありません: %q", body)
+	}
+}
+
+func TestAPIScanHandlerはfields指定でHasAgeを設定する(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.name", "Tester")
+	runGit(t, repoDir, "config", "user.email", "tester@example.com")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("ファイル作成に失敗しました: %v", err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "init")
+
+	handler := apiScanHandler(repoDir)
+	req := httptest.NewRequest(http.MethodGet, "/api/scan?fields=type,age,location", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusOK)
+	}
+
+	var res engine.Result
+	if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
+	}
+	if !res.HasAge {
+		t.Fatalf("HasAge が true ではありません: %+v", res)
+	}
+	if res.HasComment || res.HasMessage {
+		t.Fatalf("HasComment/HasMessage が false ではありません: %+v", res)
 	}
 }
