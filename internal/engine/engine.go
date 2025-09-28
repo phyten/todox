@@ -237,13 +237,13 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
 		it.AgeDays = ageDays(opts.Now, authorTime)
 		if opts.WithMessage {
-			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
+			it.Message = truncateDisplayWidth(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
 		}
 	}
 
 	if opts.WithComment {
 		cr := extractComment(m.text, opts.Type)
-		it.Comment = truncateRunes(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
+		it.Comment = truncateDisplayWidth(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
 	}
 
 	return it, errs
@@ -391,7 +391,7 @@ func extractComment(text, typ string) string {
 	return text[pos:]
 }
 
-func truncateRunes(s string, n int) string {
+func truncateDisplayWidth(s string, n int) string {
 	if n <= 0 {
 		return s
 	}

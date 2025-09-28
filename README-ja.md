@@ -14,7 +14,7 @@
 - `--mode first`：その `TODO/FIXME` を**最初に導入**した人（`git log -L`）
 - フィルタ：`--author`, `--type {todo|fixme|both}`
 - 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--with-age`（AGE 列を追加）、`--full`
-- 文字数制御：`--truncate`, `--truncate-comment`, `--truncate-message`
+- 表示幅制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
 - 進捗表示：TTY のみ stderr に 1 行上書き（`--no-progress` あり）
 - Web：`todox serve` で簡易 UI と JSON API
@@ -122,7 +122,7 @@ make build
 - `--with-age` : table / TSV に AGE（日数）列を追加
 - `--full` : `--with-comment --with-message` のショートカット
 
-### 文字数制御
+### 表示幅制御
 
 - `--truncate N` : COMMENT/MESSAGE を両方 N 桁（表示幅）に丸める（0 で無制限）
 - `--truncate-comment N` : COMMENT だけ（表示幅で）丸める
