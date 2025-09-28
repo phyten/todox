@@ -73,6 +73,8 @@ make build
 # -> http://localhost:8080 （API: /api/scan）
 ```
 
+Web フォームはサーバー既定に合わせています。`ignore whitespace` チェックは最初から ON（= `ignore_ws=true`）で、`jobs` 欄は空欄（自動）。既定のままならクエリに含めず、変更したときだけパラメータを送信します。
+
 ---
 
 ## Dev Container（推奨の開発環境）

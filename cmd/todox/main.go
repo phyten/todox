@@ -443,6 +443,8 @@ input[type=text]{width:240px}
 <label>author (regexp): <input name="author" type="text"></label>
 <label><input type="checkbox" name="with_comment"> comment</label>
 <label><input type="checkbox" name="with_message"> message</label>
+<label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
+<label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
 <label>truncate: <input type="text" name="truncate" value="120"></label>
 <button>Scan</button>
 </form>
@@ -469,7 +471,30 @@ f.onsubmit=async (e)=>{
  e.preventDefault();
  hideError();
  try{
-  const q=new URLSearchParams(new FormData(f));
+  const fd=new FormData(f);
+  const q=new URLSearchParams(fd);
+
+  // ensure ignore_ws follows server default semantics (true by default)
+  {
+    const el=f.elements.namedItem('ignore_ws');
+    if(el instanceof HTMLInputElement){
+      if(el.checked){
+        q.delete('ignore_ws');
+      }else{
+        q.set('ignore_ws','0');
+      }
+    }
+  }
+
+  // only send jobs when explicitly provided
+  {
+    const el=f.elements.namedItem('jobs');
+    if(el instanceof HTMLInputElement){
+      if((el.value||'').trim()===''){
+        q.delete('jobs');
+      }
+    }
+  }
   const res=await fetch('/api/scan?'+q.toString());
   if(!res.ok){
    let msg='HTTP '+res.status;

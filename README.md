@@ -72,6 +72,8 @@ make build
 # -> http://localhost:8080 (JSON API: /api/scan)
 ```
 
+The web form mirrors the server defaults: *ignore whitespace* starts checked (matching `ignore_ws=true`) and the *jobs* field is blank (auto). Those parameters are only sent when you explicitly change them, so leaving the defaults keeps the API behaviour unchanged.
+
 ---
 
 ## Dev Container (recommended development setup)
