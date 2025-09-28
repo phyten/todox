@@ -46,6 +46,7 @@ type Result struct {
 	Items      []Item      `json:"items"`
 	HasComment bool        `json:"has_comment"`
 	HasMessage bool        `json:"has_message"`
+	HasAge     bool        `json:"has_age"`
 	Total      int         `json:"total"`
 	ElapsedMS  int64       `json:"elapsed_ms"`
 	Errors     []ItemError `json:"errors,omitempty"`

@@ -58,7 +58,7 @@ make build
 ./bin/todox -a 'Alice|alice@example.com'
 
 # Surface the stalest TODO/FIXME items first and display AGE in the output
-./bin/todox --with-age --sort -age
+./bin/todox --fields type,author,date,age,location --sort -age,file,line
 
 # Export as TSV or JSON
 ./bin/todox --output tsv  > todo.tsv
@@ -105,6 +105,7 @@ make build
 
 ### Extra columns (hidden by default)
 
+- `--fields type,author,date,age,location`: choose columns for table/TSV (comma-separated, overrides `--with-*`)
 - `--with-comment`: include the TODO/FIXME line text
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
@@ -119,7 +120,7 @@ make build
 
 ### Sorting
 
-- `--sort -age`: prioritize the oldest TODO/FIXME items (fallback to file/line order)
+- `--sort SPEC`: comma-separated keys such as `--sort -age,file`. Supported keys: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location`
 
 ### Progress / blame behaviour
 

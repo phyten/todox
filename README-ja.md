@@ -59,7 +59,7 @@ make build
 ./bin/todox -a 'Alice|alice@example.com'
 
 # 最古の TODO/FIXME から順に表示し、AGE 列を追加
-./bin/todox --with-age --sort -age
+./bin/todox --fields type,author,date,age,location --sort -age,file,line
 
 # TSV / JSON で出力
 ./bin/todox --output tsv  > todo.tsv
@@ -106,6 +106,7 @@ make build
 
 ### 追加列（非表示が既定）
 
+- `--fields type,author,date,age,location` : table / TSV の列をカンマ区切りで指定（`--with-*` より優先）
 - `--with-comment` : TODO/FIXME 行を表示
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
@@ -120,7 +121,7 @@ make build
 
 ### 並び替え
 
-- `--sort -age` : 最も古い TODO/FIXME を優先表示（同値はファイル名+行番号で安定ソート）
+- `--sort SPEC` : `--sort -age,file` のようにカンマ区切りで指定。利用可能なキー: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location`
 
 ### 進捗・ blame の振る舞い
 

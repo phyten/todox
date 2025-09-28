@@ -11,6 +11,15 @@ import (
 	"github.com/example/todox/internal/engine"
 )
 
+func mustResolveFields(t *testing.T, raw string, withComment, withMessage, withAge bool) FieldLayout {
+	t.Helper()
+	layout, err := resolveFields(raw, withComment, withMessage, withAge)
+	if err != nil {
+		t.Fatalf("resolveFields failed: %v", err)
+	}
+	return layout
+}
+
 func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -28,7 +37,8 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	layout := mustResolveFields(t, "", true, true, false)
+	printTSV(res, layout.Fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -57,7 +67,8 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	layout := mustResolveFields(t, "", true, false, false)
+	printTSV(res, layout.Fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -101,7 +112,8 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, false)
+	layout := mustResolveFields(t, "", true, false, false)
+	printTable(res, layout.Fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -139,7 +151,8 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTSV(res, engine.Options{}, true)
+	layout := mustResolveFields(t, "", false, false, true)
+	printTSV(res, layout.Fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -177,7 +190,8 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, true)
+	layout := mustResolveFields(t, "", false, false, true)
+	printTable(res, layout.Fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -193,7 +207,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	}
 }
 
-func TestSortItemsは年齢順に並び替える(t *testing.T) {
+func TestApplySortは年齢順に並び替える(t *testing.T) {
 	items := []engine.Item{
 		{AgeDays: 1, File: "b.go", Line: 30},
 		{AgeDays: 10, File: "a.go", Line: 20},
@@ -201,13 +215,70 @@ func TestSortItemsは年齢順に並び替える(t *testing.T) {
 		{AgeDays: 3, File: "c.go", Line: 5},
 	}
 
-	sortItems(items, "-age")
+	spec, err := ParseSortSpec("-age")
+	if err != nil {
+		t.Fatalf("ParseSortSpec failed: %v", err)
+	}
+	ApplySort(items, spec)
 
 	if items[0].Line != 10 || items[1].Line != 20 {
 		t.Fatalf("AGE 降順＋ファイル/行のタイブレークが期待通りではありません: %+v", items[:2])
 	}
 	if items[len(items)-1].AgeDays != 1 {
 		t.Fatalf("最も若い項目が末尾に来ていません: %+v", items)
+	}
+}
+
+func TestParseSortSpecはエイリアスを解釈する(t *testing.T) {
+	spec, err := ParseSortSpec("location,-date")
+	if err != nil {
+		t.Fatalf("ParseSortSpec failed: %v", err)
+	}
+	if len(spec.Keys) != 3 {
+		t.Fatalf("キー数が一致しません: %d", len(spec.Keys))
+	}
+	if spec.Keys[0] != (SortKey{Name: "file", Desc: false}) {
+		t.Fatalf("location の展開が不正です: %+v", spec.Keys[0])
+	}
+	if spec.Keys[1] != (SortKey{Name: "line", Desc: false}) {
+		t.Fatalf("location のline展開が不正です: %+v", spec.Keys[1])
+	}
+	if spec.Keys[2] != (SortKey{Name: "age", Desc: false}) {
+		t.Fatalf("date の降順変換が不正です: %+v", spec.Keys[2])
+	}
+}
+
+func TestParseSortSpecは未知キーを拒否する(t *testing.T) {
+	if _, err := ParseSortSpec("unknown"); err == nil {
+		t.Fatal("未知キーがエラーになっていません")
+	}
+	if _, err := ParseSortSpec(""); err != nil {
+		t.Fatalf("空文字は許容されるべきです: %v", err)
+	}
+}
+
+func TestResolveFieldsはカスタム順序を維持する(t *testing.T) {
+	layout, err := resolveFields("type,age,location,message", false, false, false)
+	if err != nil {
+		t.Fatalf("resolveFields failed: %v", err)
+	}
+	want := []FieldName{FieldType, FieldAge, FieldLocation, FieldMessage}
+	if len(layout.Fields) != len(want) {
+		t.Fatalf("フィールド数が一致しません: got=%d want=%d", len(layout.Fields), len(want))
+	}
+	for i, f := range want {
+		if layout.Fields[i] != f {
+			t.Fatalf("フィールド順が一致しません: index=%d got=%v want=%v", i, layout.Fields[i], f)
+		}
+	}
+	if layout.ShowComment {
+		t.Fatal("commentが誤って有効になっています")
+	}
+	if !layout.ShowMessage {
+		t.Fatal("messageが有効になっていません")
+	}
+	if !layout.ShowAge {
+		t.Fatal("ageが有効になっていません")
 	}
 }
 

@@ -94,9 +94,16 @@ func TestParseScanArgsWithAgeAndSort(t *testing.T) {
 	}
 }
 
-func TestParseScanArgsRejectsUnknownSort(t *testing.T) {
-	if _, err := parseScanArgs([]string{"--sort", "author"}, "en"); err == nil {
-		t.Fatal("expected error for unsupported --sort value")
+func TestParseScanArgsStoresFields(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--fields", "type,comment"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if cfg.fields != "type,comment" {
+		t.Fatalf("fields mismatch: got %q", cfg.fields)
+	}
+	if cfg.withComment {
+		t.Fatalf("withComment should remain false until resolved")
 	}
 }
 
