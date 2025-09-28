@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/todox/internal/engine"
+	"github.com/phyten/todox/internal/engine"
 )
 
 func TestPrintTSVは出力をフラッシュする(t *testing.T) {

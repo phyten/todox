@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/todox/internal/engine"
+	"github.com/phyten/todox/internal/engine"
 )
 
 func TestAPIScanHandlerはXSS向けに生文字列を返す(t *testing.T) {

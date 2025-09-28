@@ -13,9 +13,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/example/todox/internal/engine"
-	engineopts "github.com/example/todox/internal/engine/opts"
-	"github.com/example/todox/internal/util"
+	"github.com/phyten/todox/internal/engine"
+	engineopts "github.com/phyten/todox/internal/engine/opts"
+	"github.com/phyten/todox/internal/util"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/example/todox/internal/engine"
+	"github.com/phyten/todox/internal/engine"
 )
 
 func TestParseBoolAcceptsSynonyms(t *testing.T) {

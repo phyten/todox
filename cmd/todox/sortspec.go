@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/example/todox/internal/engine"
+	"github.com/phyten/todox/internal/engine"
 )
 
 type SortKey struct {
