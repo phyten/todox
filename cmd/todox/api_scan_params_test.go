@@ -173,6 +173,76 @@ func TestAPIScanHandlerはjobsの境界値を受け付ける(t *testing.T) {
 	}
 }
 
+func TestAPIScanHandlerはパス関連パラメータを適用する(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.name", "Tester")
+	runGit(t, repoDir, "config", "user.email", "tester@example.com")
+
+	if err := os.MkdirAll(filepath.Join(repoDir, "src"), 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗しました: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, "vendor"), 0o755); err != nil {
+		t.Fatalf("ディレクトリの作成に失敗しました: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "src", "main.go"), []byte("package main\n// TODO in src\n"), 0o644); err != nil {
+		t.Fatalf("ファイル作成に失敗しました: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "vendor", "lib.go"), []byte("package vendor\n// TODO in vendor\n"), 0o644); err != nil {
+		t.Fatalf("ファイル作成に失敗しました: %v", err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add todos")
+
+	handler := apiScanHandler(repoDir)
+
+	checkCount := func(t *testing.T, query string, want int, wantFirst string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/scan"+query, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusOK)
+		}
+		var res engine.Result
+		if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+			t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
+		}
+		if res.Total != want {
+			t.Fatalf("ヒット件数が期待と異なります: got=%d want=%d", res.Total, want)
+		}
+		if want > 0 && res.Items[0].File != wantFirst {
+			t.Fatalf("最初のファイルが期待と異なります: got=%q want=%q", res.Items[0].File, wantFirst)
+		}
+	}
+
+	checkCount(t, "", 2, "src/main.go")
+	checkCount(t, "?path=src", 1, "src/main.go")
+	checkCount(t, "?exclude=vendor/**", 1, "src/main.go")
+	checkCount(t, "?path_regex=^src/", 1, "src/main.go")
+	checkCount(t, "?exclude_typical=1", 1, "src/main.go")
+}
+
+func TestAPIScanHandlerは不正なpathRegexで400を返す(t *testing.T) {
+	t.Parallel()
+
+	handler := apiScanHandler(".")
+	req := httptest.NewRequest(http.MethodGet, "/api/scan?path_regex=[", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("ステータスコードが一致しません: got=%d want=%d", rr.Code, http.StatusBadRequest)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "invalid --path-regex") {
+		t.Fatalf("エラーメッセージが期待通りではありません: %q", body)
+	}
+}
+
 func gitRevParse(t *testing.T, dir string, rev string) string {
 	t.Helper()
 

@@ -53,10 +53,15 @@ func Run(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("invalid --type: %s", opts.Type)
 	}
 
-	matches, err := gitGrep(opts.RepoDir, grepPat)
+	matches, err := gitGrep(opts.RepoDir, grepPat, opts)
 	if err != nil {
 		return nil, err
 	}
+	rx, err := compilePathRegex(opts.PathRegex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --path-regex: %w", err)
+	}
+	matches = filterByPathRegex(matches, rx)
 	if len(matches) == 0 {
 		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, Total: 0, ElapsedMS: msSince(start)}, nil
 	}
@@ -240,8 +245,11 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 	return it, errs
 }
 
-func gitGrep(repo, pattern string) ([]match, error) {
-	cmd := exec.Command("git", "-c", "core.quotePath=false", "grep", "-nI", "--no-color", "-E", pattern, "--", ".")
+func gitGrep(repo, pattern string, opts Options) ([]match, error) {
+	pathspecs := buildGrepPathspecs(opts.Paths, opts.Excludes, opts.ExcludeTypical)
+	args := []string{"-c", "core.quotePath=false", "grep", "-nI", "--no-color", "-E", pattern, "--"}
+	args = append(args, pathspecs...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {

@@ -3,6 +3,7 @@ package opts
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -114,6 +115,22 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 		}
 		out.Progress = v
 	}
+	if raw := q["path"]; len(raw) > 0 {
+		out.Paths = SplitMulti(raw)
+	}
+	if raw := q["exclude"]; len(raw) > 0 {
+		out.Excludes = SplitMulti(raw)
+	}
+	if raw := q["path_regex"]; len(raw) > 0 {
+		out.PathRegex = SplitMulti(raw)
+	}
+	if raw, ok := lastLiteralValue(q["exclude_typical"]); ok {
+		v, err := ParseBool(raw, "exclude_typical")
+		if err != nil {
+			return out, err
+		}
+		out.ExcludeTypical = v
+	}
 	if raw, ok := lastRawValue(q["repo"]); ok {
 		out.RepoDir = raw
 	}
@@ -161,6 +178,16 @@ func NormalizeAndValidate(o *engine.Options) error {
 
 	if strings.TrimSpace(o.RepoDir) == "" {
 		o.RepoDir = "."
+	}
+
+	o.Paths = trimSlice(o.Paths)
+	o.Excludes = trimSlice(o.Excludes)
+	o.PathRegex = trimSlice(o.PathRegex)
+
+	for _, pattern := range o.PathRegex {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid --path-regex: %w", err)
+		}
 	}
 
 	return nil
@@ -251,4 +278,19 @@ func lastRawValue(vals []string) (string, bool) {
 		return trimmed, true
 	}
 	return "", false
+}
+
+func trimSlice(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	out := values[:0]
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
