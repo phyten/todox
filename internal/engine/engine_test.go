@@ -159,7 +159,7 @@ func TestTruncateRunes多バイト文字と省略記号(t *testing.T) {
 	if got := truncateRunes(input, 0); got != input {
 		t.Fatalf("0指定の場合は元の文字列を返すべきです: got=%q want=%q", got, input)
 	}
-	if got := truncateRunes(input, 3); got != "あい…" {
+	if got := truncateRunes(input, 3); got != "あ…" {
 		t.Fatalf("多バイト文字の切り詰めが期待と異なります: got=%q want=%q", got, "あい…")
 	}
 	if got := truncateRunes("abc", 1); got != "…" {

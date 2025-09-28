@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/phyten/todox/internal/textutil"
 	"github.com/phyten/todox/internal/util"
 )
 
@@ -395,14 +395,13 @@ func truncateRunes(s string, n int) string {
 	if n <= 0 {
 		return s
 	}
-	if utf8.RuneCountInString(s) <= n {
+	if textutil.VisibleWidth(s) <= n {
 		return s
 	}
-	rs := []rune(s)
-	if n <= 1 {
-		return "…"
+	if out := textutil.TruncateByWidth(s, n, "…"); out != "" {
+		return out
 	}
-	return string(rs[:n-1]) + "…"
+	return textutil.TruncateByWidth(s, n, "")
 }
 
 func effectiveTrunc(specific, all int) int {

@@ -219,7 +219,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	if !strings.Contains(text, "AGE") {
 		t.Fatalf("AGE ヘッダーが含まれていません: %q", text)
 	}
-	if !strings.Contains(text, "  5    abcdef01") {
+	if !strings.Contains(text, "    5  abcdef01") {
 		t.Fatalf("AGE 列の値が期待通りではありません: %q", text)
 	}
 }

@@ -124,9 +124,11 @@ make build
 
 ### 文字数制御
 
-- `--truncate N` : COMMENT/MESSAGE を両方 N 文字に丸める（0 で無制限）
-- `--truncate-comment N` : COMMENT だけ丸める
-- `--truncate-message N` : MESSAGE だけ丸める
+- `--truncate N` : COMMENT/MESSAGE を両方 N 桁（表示幅）に丸める（0 で無制限）
+- `--truncate-comment N` : COMMENT だけ（表示幅で）丸める
+- `--truncate-message N` : MESSAGE だけ（表示幅で）丸める
+
+表示幅は Unicode の wcwidth に準拠して計算され、結合文字や絵文字を壊しません。日本語端末などで曖昧幅を 2 として扱いたい場合は `TODOX_EASTASIAN=1` を設定してください。
 
 ### 並び替え
 
@@ -163,7 +165,7 @@ CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レ
 | `--exclude`, `exclude` | 同上 | `:(exclude)` や `:!` で始まる場合はそのまま尊重し、そうでなければ内部的に `:(glob,exclude)` を付与します。 |
 | `--path-regex`, `path_regex` | Go の正規表現 | すべて事前にコンパイルし、不正なパターンは即エラーになります。 |
 | `--exclude-typical`, `exclude_typical` | 真偽値（他のフラグと同じリテラル） | 組み込みの除外セットを有効化（`vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`）。 |
-| `--truncate`, `--truncate-comment`, `--truncate-message`（および API 版） | 0 以上の整数 | 負の値はエラーになります。COMMENT と MESSAGE を両方表示し、トランケート指定が無い場合は既定で 120 文字が適用されます。 |
+| `--truncate`, `--truncate-comment`, `--truncate-message`（および API 版） | 0 以上の整数 | 負の値はエラーになります。COMMENT と MESSAGE を両方表示し、トランケート指定が無い場合は既定で 120 桁（表示幅）が適用されます。 |
 
 `jobs` の既定値は `min(runtime.NumCPU(), 64)`（CPU コア数を 64 で上限）です。
 
