@@ -232,7 +232,7 @@ func TestGitGrepHandlesLongLines(t *testing.T) {
 	runGit(t, repoDir, "add", "long.go")
 	runGit(t, repoDir, "commit", "-m", "add long line")
 
-        matches, err := gitGrep(repoDir, "TODO", Options{RepoDir: repoDir})
+	matches, err := gitGrep(repoDir, "TODO", nil, nil, false)
 	if err != nil {
 		t.Fatalf("gitGrep returned error: %v", err)
 	}

@@ -56,7 +56,7 @@ func buildGrepPathspecs(includes, excludes []string, typical bool) []string {
 	return out
 }
 
-func compilePathRegex(patterns []string) ([]*regexp.Regexp, error) {
+func CompilePathRegex(patterns []string) ([]*regexp.Regexp, error) {
 	if len(patterns) == 0 {
 		return nil, nil
 	}
@@ -81,8 +81,9 @@ func filterByPathRegex(matches []match, rx []*regexp.Regexp) []match {
 	}
 	out := matches[:0]
 	for _, m := range matches {
+		file := strings.ReplaceAll(filepath.ToSlash(m.file), "\\", "/")
 		for _, r := range rx {
-			if r.MatchString(m.file) {
+			if r.MatchString(file) {
 				out = append(out, m)
 				break
 			}

@@ -121,6 +121,9 @@ func TestNormalizeAndValidate(t *testing.T) {
 	if len(opts.PathRegex) != 1 || opts.PathRegex[0] != "^src/" {
 		t.Fatalf("path regex should be trimmed: %#v", opts.PathRegex)
 	}
+	if len(opts.PathRegexCompiled) != 1 || opts.PathRegexCompiled[0].String() != "^src/" {
+		t.Fatalf("compiled regex should mirror trimmed pattern: %#v", opts.PathRegexCompiled)
+	}
 
 	bad := engine.Options{Type: "unknown", Mode: "last", Jobs: 1}
 	if err := NormalizeAndValidate(&bad); err == nil {

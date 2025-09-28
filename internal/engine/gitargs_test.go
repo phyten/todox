@@ -58,7 +58,7 @@ func TestBuildGrepPathspecsIncludesAndExcludes(t *testing.T) {
 func TestCompilePathRegexTrimsAndValidates(t *testing.T) {
 	t.Parallel()
 
-	rx, err := compilePathRegex([]string{"  ", "^src/", "(cmd|pkg)"})
+	rx, err := CompilePathRegex([]string{"  ", "^src/", "(cmd|pkg)"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestCompilePathRegexTrimsAndValidates(t *testing.T) {
 		t.Fatalf("expected 2 regexps, got %d", len(rx))
 	}
 
-	if _, err := compilePathRegex([]string{"["}); err == nil {
+	if _, err := CompilePathRegex([]string{"["}); err == nil {
 		t.Fatal("expected compile error for invalid regexp")
 	}
 }
@@ -91,5 +91,20 @@ func TestFilterByPathRegex(t *testing.T) {
 	empty := filterByPathRegex(matches, nil)
 	if len(empty) != len(matches) {
 		t.Fatalf("expected original slice when no regex: %d vs %d", len(empty), len(matches))
+	}
+}
+
+func TestFilterByPathRegexNormalizesWindowsSeparators(t *testing.T) {
+	t.Parallel()
+
+	matches := []match{{file: `pkg\utils\todo.go`}}
+	rx := []*regexp.Regexp{regexp.MustCompile(`^pkg/utils/`)}
+
+	got := filterByPathRegex(matches, rx)
+	if len(got) != 1 {
+		t.Fatalf("expected match to survive normalization, got %d", len(got))
+	}
+	if got[0].file != matches[0].file {
+		t.Fatalf("expected original match to be retained, got %q", got[0].file)
 	}
 }

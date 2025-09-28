@@ -3,7 +3,6 @@ package opts
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -184,11 +183,11 @@ func NormalizeAndValidate(o *engine.Options) error {
 	o.Excludes = trimSlice(o.Excludes)
 	o.PathRegex = trimSlice(o.PathRegex)
 
-	for _, pattern := range o.PathRegex {
-		if _, err := regexp.Compile(pattern); err != nil {
-			return fmt.Errorf("invalid --path-regex: %w", err)
-		}
+	compiled, err := engine.CompilePathRegex(o.PathRegex)
+	if err != nil {
+		return fmt.Errorf("invalid --path-regex: %w", err)
 	}
+	o.PathRegexCompiled = compiled
 
 	return nil
 }
