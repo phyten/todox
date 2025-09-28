@@ -94,9 +94,9 @@ func TestParseScanArgsWithAgeAndSort(t *testing.T) {
 	}
 }
 
-func TestParseScanArgsRejectsUnknownSort(t *testing.T) {
-	if _, err := parseScanArgs([]string{"--sort", "author"}, "en"); err == nil {
-		t.Fatal("expected error for unsupported --sort value")
+func TestParseSortSpecRejectsUnknownKey(t *testing.T) {
+	if _, err := ParseSortSpec("-unknown"); err == nil {
+		t.Fatal("未知キーに対するエラーを期待しました")
 	}
 }
 

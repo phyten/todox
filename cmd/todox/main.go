@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -36,6 +35,7 @@ type scanConfig struct {
 	withMessage bool
 	withAge     bool
 	sortKey     string
+	fields      string
 	showHelp    bool
 	helpLang    string
 }
@@ -64,7 +64,8 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	noIgnoreWS := fs.Bool("no-ignore-ws", false, "include whitespace-only changes in blame")
 	noProgress := fs.Bool("no-progress", false, "disable progress/ETA")
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
-	sortKey := fs.String("sort", "", "sort order (first step: -age)")
+	sortKey := fs.String("sort", "", "sort order (comma separated, e.g. -age,file,line)")
+	fields := fs.String("fields", "", "comma-separated columns for table/tsv (overrides --with-*)")
 	lang := fs.String("lang", "", "help language (en|ja)")
 	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
@@ -149,12 +150,6 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		*withComment = true
 	}
 
-	switch *sortKey {
-	case "", "-age":
-	default:
-		return cfg, fmt.Errorf("invalid --sort: %s (supported: -age)", *sortKey)
-	}
-
 	if *lang != "" && !helpLangSet {
 		cfg.helpLang = strings.ToLower(*lang)
 	}
@@ -181,6 +176,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.withMessage = *withMessage
 	cfg.withAge = *withAge
 	cfg.sortKey = *sortKey
+	cfg.fields = *fields
 
 	return cfg, nil
 }
@@ -201,16 +197,40 @@ func scanCmd(args []string) {
 		return
 	}
 
+	sortSpec, err := ParseSortSpec(cfg.sortKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fieldSel, err := ResolveFields(cfg.fields, cfg.withComment, cfg.withMessage, cfg.withAge)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	outputMode := strings.ToLower(cfg.output)
+	if outputMode != "json" {
+		if fieldSel.HasComment && !cfg.opts.WithComment {
+			cfg.opts.WithComment = true
+		}
+		if fieldSel.HasMessage && !cfg.opts.WithMessage {
+			cfg.opts.WithMessage = true
+		}
+	}
+
 	res, err := engine.Run(cfg.opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if cfg.sortKey != "" {
-		sortItems(res.Items, cfg.sortKey)
+	ApplySort(res.Items, sortSpec)
+
+	if outputMode != "json" {
+		res.HasComment = fieldSel.HasComment
+		res.HasMessage = fieldSel.HasMessage
+		res.HasAge = fieldSel.HasAge
 	}
 
-	switch strings.ToLower(cfg.output) {
+	switch outputMode {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -218,9 +238,9 @@ func scanCmd(args []string) {
 			log.Fatal(err)
 		}
 	case "tsv":
-		printTSV(res, cfg.opts, cfg.withAge)
+		printTSV(res, fieldSel)
 	default: // table
-		printTable(res, cfg.opts, cfg.withAge)
+		printTable(res, fieldSel)
 	}
 
 	if res.ErrorCount > 0 {
@@ -251,6 +271,7 @@ Search & attribution:
 
 Output:
   -o, --output {table|tsv|json}  Output format (default: table)
+      --fields COLS              Columns for table/tsv (comma separated, overrides --with-*)
 
 Extra columns (hidden by default):
       --full                     Show both COMMENT and MESSAGE columns
@@ -266,7 +287,8 @@ Truncation (applies to COMMENT / MESSAGE only):
                                  Tip: --full alone defaults to 120 chars for both.
 
 Sorting:
-      --sort -age                Oldest items first (fallback: file/line)
+      --sort KEYS                Comma separated keys (e.g. -age,file,line).
+                                 Keys: age|age_days|date|author|email|type|file|line|commit|location
 
 Blame / progress:
       --no-ignore-ws             Do not pass -w to git blame (whitespace changes count)
@@ -325,6 +347,7 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
 
 出力:
   -o, --output {table|tsv|json}  出力形式（既定: table）
+      --fields 列1,列2,...       table/tsv の表示列を指定（カンマ区切り。--with-* より優先）
 
 追加カラム（既定は非表示）:
       --full                     COMMENT と MESSAGE を両方表示
@@ -340,7 +363,8 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
                                  ※ --full だけ指定した場合は既定で 120 文字
 
 並び替え:
-      --sort -age                最古順（降順）。同値は file/line
+      --sort キー[,キー...]      カンマ区切りで複数キー指定（例: -age,file,line）
+                                 使用可能: age|age_days|date|author|email|type|file|line|commit|location
 
 Blame / 進捗:
       --no-ignore-ws             git blame の -w を無効化（空白変更も追跡）
@@ -498,23 +522,41 @@ function render(data){
         parts.push('<p>No results.</p>');
         return parts.join('');
  }
- let h='<table><thead><tr><th>TYPE</th><th>AUTHOR</th><th>EMAIL</th><th>DATE</th><th>COMMIT</th><th>LOCATION</th><th>COMMENT</th><th>MESSAGE</th></tr></thead><tbody>';
+ const hasComment=!!data.has_comment;
+ const hasMessage=!!data.has_message;
+ const hasAge=!!data.has_age;
+ let headers=['TYPE','AUTHOR','EMAIL','DATE'];
+ if(hasAge){headers.push('AGE');}
+ headers.push('COMMIT','LOCATION');
+ if(hasComment){headers.push('COMMENT');}
+ if(hasMessage){headers.push('MESSAGE');}
+ let h='<table><thead><tr>';
+ for(const head of headers){
+  h+='<th>'+head+'</th>';
+ }
+ h+='</tr></thead><tbody>';
  for(const r of rows){
-       h+='<tr>'+
-               '<td>'+escText(r.kind||'')+'</td>'+
-               '<td>'+escText(r.author||'')+'</td>'+
-               '<td>'+escText(r.email||'')+'</td>'+
-               '<td>'+escText(r.date||'')+'</td>'+
-               '<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>'+
-               (()=>{
-                       const fileRaw=r.file==null?'':String(r.file);
-                       const lineRaw=r.line==null||r.line===0?'':String(r.line);
-                       const loc=fileRaw+':'+lineRaw;
-                       return '<td><code>'+escText(loc)+'</code></td>';
-               })()+
-               '<td>'+escText(r.comment||'')+'</td>'+
-               '<td>'+escText(r.message||'')+'</td>'+
-               '</tr>';
+  h+='<tr>'+
+    '<td>'+escText(r.kind||'')+'</td>'+
+    '<td>'+escText(r.author||'')+'</td>'+
+    '<td>'+escText(r.email||'')+'</td>'+
+    '<td>'+escText(r.date||'')+'</td>';
+  if(hasAge){
+    const ageVal=r.age_days==null?'':String(r.age_days);
+    h+='<td>'+escText(ageVal)+'</td>';
+  }
+  h+='<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>';
+  const fileRaw=r.file==null?'':String(r.file);
+  const lineRaw=r.line==null||r.line===0?'':String(r.line);
+  const loc=fileRaw+':'+lineRaw;
+  h+='<td><code>'+escText(loc)+'</code></td>';
+  if(hasComment){
+    h+='<td>'+escText(r.comment||'')+'</td>';
+  }
+  if(hasMessage){
+    h+='<td>'+escText(r.message||'')+'</td>';
+  }
+  h+='</tr>';
  }
  h+='</tbody></table>';
  parts.push(h);
@@ -583,6 +625,11 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		withAge, err := parseBoolParam(q, "with_age")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		truncAll, err := parseIntParam(q, "truncate")
 		if err != nil {
@@ -595,6 +642,18 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			return
 		}
 		truncMessage, err := parseIntParam(q, "truncate_message")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		sortSpec, err := ParseSortSpec(q.Get("sort"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		fieldSel, err := ResolveFields(q.Get("fields"), withComment, withMessage, withAge)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -618,11 +677,21 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			opts.TruncAll == 0 && opts.TruncComment == 0 && opts.TruncMessage == 0 {
 			opts.TruncAll = 120
 		}
+		if fieldSel.HasComment && !opts.WithComment {
+			opts.WithComment = true
+		}
+		if fieldSel.HasMessage && !opts.WithMessage {
+			opts.WithMessage = true
+		}
 		res, err := engine.Run(opts)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		ApplySort(res.Items, sortSpec)
+		res.HasComment = fieldSel.HasComment
+		res.HasMessage = fieldSel.HasMessage
+		res.HasAge = fieldSel.HasAge
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	}
@@ -644,97 +713,44 @@ func parseIntParam(q map[string][]string, key string) (int, error) {
 	return n, nil
 }
 
-func sortItems(items []engine.Item, key string) {
-	switch key {
-	case "":
-		return
-	case "-age":
-		sort.SliceStable(items, func(i, j int) bool {
-			if items[i].AgeDays == items[j].AgeDays {
-				if items[i].File == items[j].File {
-					return items[i].Line < items[j].Line
-				}
-				return items[i].File < items[j].File
-			}
-			return items[i].AgeDays > items[j].AgeDays
-		})
-	}
-}
-
-func printTSV(res *engine.Result, _ engine.Options, showAge bool) {
+func printTSV(res *engine.Result, sel FieldSelection) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
-	if showAge {
-		headers = append(headers, "AGE")
-	}
-	headers = append(headers, "COMMIT", "LOCATION")
-	if res.HasComment {
-		headers = append(headers, "COMMENT")
-	}
-	if res.HasMessage {
-		headers = append(headers, "MESSAGE")
+	headers := make([]string, len(sel.Fields))
+	for i, f := range sel.Fields {
+		headers[i] = f.Header
 	}
 	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
-		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date}
-		if showAge {
-			base = append(base, strconv.Itoa(it.AgeDays))
+		row := make([]string, len(sel.Fields))
+		for i, f := range sel.Fields {
+			row[i] = sanitizeField(f.Value(it))
 		}
-		base = append(base, short(it.Commit), loc)
-		if res.HasComment {
-			base = append(base, it.Comment)
-		}
-		if res.HasMessage {
-			base = append(base, it.Message)
-		}
-		for i := range base {
-			base[i] = sanitizeField(base[i])
-		}
-		write(strings.Join(base, "\t"))
+		write(strings.Join(row, "\t"))
 	}
 	if err := w.Flush(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func printTable(res *engine.Result, _ engine.Options, showAge bool) {
+func printTable(res *engine.Result, sel FieldSelection) {
 	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	headers := []string{"TYPE", "AUTHOR", "EMAIL", "DATE"}
-	if showAge {
-		headers = append(headers, "AGE")
-	}
-	headers = append(headers, "COMMIT", "LOCATION")
-	if res.HasComment {
-		headers = append(headers, "COMMENT")
-	}
-	if res.HasMessage {
-		headers = append(headers, "MESSAGE")
+	headers := make([]string, len(sel.Fields))
+	for i, f := range sel.Fields {
+		headers[i] = f.Header
 	}
 	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
-		loc := fmt.Sprintf("%s:%d", it.File, it.Line)
-		base := []string{it.Kind, it.Author, it.Email, it.Date}
-		if showAge {
-			base = append(base, strconv.Itoa(it.AgeDays))
+		row := make([]string, len(sel.Fields))
+		for i, f := range sel.Fields {
+			row[i] = sanitizeField(f.Value(it))
 		}
-		base = append(base, short(it.Commit), loc)
-		if res.HasComment {
-			base = append(base, it.Comment)
-		}
-		if res.HasMessage {
-			base = append(base, it.Message)
-		}
-		for i := range base {
-			base[i] = sanitizeField(base[i])
-		}
-		write(strings.Join(base, "\t"))
+		write(strings.Join(row, "\t"))
 	}
 	if err := w.Flush(); err != nil {
 		log.Fatal(err)

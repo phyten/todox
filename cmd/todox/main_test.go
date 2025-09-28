@@ -23,12 +23,14 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	})
 
 	res := &engine.Result{
-		HasComment: true,
-		HasMessage: true,
-		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
+		Items: []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
+	}
+	sel, err := ResolveFields("", true, true, false)
+	if err != nil {
+		t.Fatalf("フィールド解決に失敗しました: %v", err)
 	}
 
-	printTSV(res, engine.Options{}, false)
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -53,11 +55,14 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 	})
 
 	res := &engine.Result{
-		HasComment: true,
-		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
+		Items: []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
+	}
+	sel, err := ResolveFields("", true, false, false)
+	if err != nil {
+		t.Fatalf("フィールド解決に失敗しました: %v", err)
 	}
 
-	printTSV(res, engine.Options{}, false)
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -89,7 +94,6 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	})
 
 	res := &engine.Result{
-		HasComment: true,
 		Items: []engine.Item{{
 			Kind:    "FIXME",
 			Author:  "田中",
@@ -100,8 +104,12 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 			Comment: "1行目\r\n2行目\t継続\r3行目",
 		}},
 	}
+	sel, err := ResolveFields("", true, false, false)
+	if err != nil {
+		t.Fatalf("フィールド解決に失敗しました: %v", err)
+	}
 
-	printTable(res, engine.Options{}, false)
+	printTable(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -139,7 +147,12 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTSV(res, engine.Options{}, true)
+	sel, err := ResolveFields("", false, false, true)
+	if err != nil {
+		t.Fatalf("フィールド解決に失敗しました: %v", err)
+	}
+
+	printTSV(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -177,7 +190,12 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, true)
+	sel, err := ResolveFields("", false, false, true)
+	if err != nil {
+		t.Fatalf("フィールド解決に失敗しました: %v", err)
+	}
+
+	printTable(res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -201,7 +219,11 @@ func TestSortItemsは年齢順に並び替える(t *testing.T) {
 		{AgeDays: 3, File: "c.go", Line: 5},
 	}
 
-	sortItems(items, "-age")
+	spec, err := ParseSortSpec("-age")
+	if err != nil {
+		t.Fatalf("ParseSortSpec に失敗しました: %v", err)
+	}
+	ApplySort(items, spec)
 
 	if items[0].Line != 10 || items[1].Line != 20 {
 		t.Fatalf("AGE 降順＋ファイル/行のタイブレークが期待通りではありません: %+v", items[:2])

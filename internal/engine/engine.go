@@ -58,7 +58,7 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 	if len(matches) == 0 {
-		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, Total: 0, ElapsedMS: msSince(start)}, nil
+		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, HasAge: false, Total: 0, ElapsedMS: msSince(start)}, nil
 	}
 
 	// filter by TYPE precisely (for lines containing both)
@@ -167,6 +167,7 @@ func Run(opts Options) (*Result, error) {
 		Items:      final,
 		HasComment: opts.WithComment,
 		HasMessage: opts.WithMessage,
+		HasAge:     false,
 		Total:      len(final),
 		ElapsedMS:  msSince(start),
 		Errors:     errs,
