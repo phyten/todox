@@ -137,6 +137,19 @@ make build
 
 Full help: `./bin/todox -h` (bilingual output and examples).
 
+### Input normalization & validation (CLI / Web)
+
+Both the CLI flags and the `/api/scan` query parameters share the same normalization layer. All inputs are case-insensitive unless noted.
+
+| Parameter | Accepted values | Validation |
+| --- | --- | --- |
+| Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `ignore_ws`, etc.) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
+| `--type`, `type` | `todo`, `fixme`, `both` | Unknown values are rejected. |
+| `--mode`, `mode` | `last`, `first` | Unknown values are rejected. |
+| `--output` | `table`, `tsv`, `json` | Unknown values are rejected (CLI only). |
+| `--jobs`, `jobs` | Integers in `[1, 64]` | Values outside the range are rejected. |
+| `--truncate`, `--truncate-comment`, `--truncate-message` (and the API equivalents) | Integers ≥ 0 | Negative values are rejected. When both COMMENT and MESSAGE columns are enabled and no truncate is supplied, a default of 120 runes is applied. |
+
 ---
 
 ## Caveats & known limitations
