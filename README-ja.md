@@ -128,6 +128,7 @@ make build
 
 - `--no-progress` / `--progress` : 進捗表示を抑止／強制
 - `--no-ignore-ws` : `git blame` で `-w` を使わない（空白変更も最新扱い）
+- Web API: `ignore_ws=0` で空白のみの変更も追跡し、`jobs=<n>` (1〜64) でワーカー数を制限できます
 
 ### ヘルプ・言語設定
 

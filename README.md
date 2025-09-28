@@ -127,6 +127,7 @@ make build
 
 - `--no-progress` / `--progress`: disable or force the progress display
 - `--no-ignore-ws`: run `git blame` without `-w` so whitespace-only edits are considered latest
+- Web API: pass `ignore_ws=0` to honour whitespace edits and `jobs=<n>` (1–64) to cap worker concurrency
 
 ### Help & language
 
