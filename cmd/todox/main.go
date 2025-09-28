@@ -11,11 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/example/todox/internal/engine"
+	engineopts "github.com/example/todox/internal/engine/opts"
 	"github.com/example/todox/internal/util"
 )
 
@@ -67,7 +67,14 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
 	sortKey := fs.String("sort", "", "sort order (e.g. author,-date; default: file,line)")
 	lang := fs.String("lang", "", "help language (en|ja)")
-	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
+	jobsDefault := runtime.NumCPU()
+	if jobsDefault < 1 {
+		jobsDefault = 1
+	}
+	if jobsDefault > 64 {
+		jobsDefault = 64
+	}
+	jobs := fs.Int("jobs", jobsDefault, "max parallel workers")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
 
 	shortMap := map[string]string{
@@ -157,26 +164,33 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		cfg.helpLang = "en"
 	}
 
-	cfg.opts = engine.Options{
-		Type:         *typ,
-		Mode:         *mode,
-		AuthorRegex:  *author,
-		WithComment:  *withComment,
-		WithMessage:  *withMessage,
-		TruncAll:     *truncAll,
-		TruncComment: *truncComment,
-		TruncMessage: *truncMessage,
-		IgnoreWS:     !*noIgnoreWS,
-		Jobs:         *jobs,
-		RepoDir:      *repo,
-		Progress:     util.ShouldShowProgress(*forceProg, *noProgress),
+	cfg.opts = engineopts.Defaults(*repo)
+	cfg.opts.Type = *typ
+	cfg.opts.Mode = *mode
+	cfg.opts.AuthorRegex = *author
+	cfg.opts.WithComment = *withComment
+	cfg.opts.WithMessage = *withMessage
+	cfg.opts.TruncAll = *truncAll
+	cfg.opts.TruncComment = *truncComment
+	cfg.opts.TruncMessage = *truncMessage
+	cfg.opts.IgnoreWS = !*noIgnoreWS
+	cfg.opts.Jobs = *jobs
+	cfg.opts.RepoDir = *repo
+	cfg.opts.Progress = util.ShouldShowProgress(*forceProg, *noProgress)
+	normalizedOutput, err := engineopts.NormalizeOutput(*output)
+	if err != nil {
+		return cfg, err
 	}
-	cfg.output = *output
+	cfg.output = normalizedOutput
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
 	cfg.withAge = *withAge
 	cfg.sortKey = *sortKey
 	cfg.fields = *fields
+
+	if err := engineopts.NormalizeAndValidate(&cfg.opts); err != nil {
+		return cfg, err
+	}
 
 	return cfg, nil
 }
@@ -210,6 +224,10 @@ func scanCmd(args []string) {
 	cfg.opts.WithComment = fieldSel.NeedComment
 	cfg.opts.WithMessage = fieldSel.NeedMessage
 
+	if err := engineopts.NormalizeAndValidate(&cfg.opts); err != nil {
+		log.Fatal(err)
+	}
+
 	res, err := engine.Run(cfg.opts)
 	if err != nil {
 		log.Fatal(err)
@@ -228,9 +246,9 @@ func scanCmd(args []string) {
 			log.Fatal(err)
 		}
 	case "tsv":
-		printTSV(res, fieldSel)
+		printTSV(os.Stdout, res, fieldSel)
 	default: // table
-		printTable(res, fieldSel)
+		printTable(os.Stdout, res, fieldSel)
 	}
 
 	if res.ErrorCount > 0 {
@@ -570,70 +588,39 @@ func serveCmd(args []string) {
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func get(q map[string][]string, k, def string) string {
-	if v := q[k]; len(v) > 0 && v[0] != "" {
-		return v[0]
-	}
-	return def
-}
-
-func parseBoolParam(q map[string][]string, key string) (bool, error) {
-	vals, ok := q[key]
-	if !ok || len(vals) == 0 {
-		return false, nil
-	}
-	raw := strings.TrimSpace(vals[0])
-	if raw == "" {
-		return false, nil
-	}
-
-	switch strings.ToLower(raw) {
-	case "1", "true", "yes", "on":
-		return true, nil
-	case "0", "false", "no", "off":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid value for %s: %q", key, raw)
-	}
-}
-
 func apiScanHandler(repoDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 
-		withComment, err := parseBoolParam(q, "with_comment")
+		opts := engineopts.Defaults(repoDir)
+		applied, err := engineopts.ApplyWebQueryToOptions(opts, q)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		withMessage, err := parseBoolParam(q, "with_message")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		withAge, err := parseBoolParam(q, "with_age")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		opts = applied
+
+		withAge := false
+		if raw := strings.TrimSpace(q.Get("with_age")); raw != "" {
+			v, err := engineopts.ParseBool(raw, "with_age")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			withAge = v
 		}
 
-		truncAll, err := parseIntParam(q, "truncate")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		truncComment, err := parseIntParam(q, "truncate_comment")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		truncMessage, err := parseIntParam(q, "truncate_message")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		outFormat := "json"
+		if q.Has("output") {
+			normalized, err := engineopts.NormalizeOutput(q.Get("output"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			outFormat = normalized
 		}
 
-		fieldSel, err := ResolveFields(q.Get("fields"), withComment, withMessage, withAge)
+		fieldSel, err := ResolveFields(q.Get("fields"), opts.WithComment, opts.WithMessage, withAge)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -645,24 +632,14 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			return
 		}
 
-		opts := engine.Options{
-			Type:         get(q, "type", "both"),
-			Mode:         get(q, "mode", "last"),
-			AuthorRegex:  q.Get("author"),
-			WithComment:  fieldSel.NeedComment,
-			WithMessage:  fieldSel.NeedMessage,
-			TruncAll:     truncAll,
-			TruncComment: truncComment,
-			TruncMessage: truncMessage,
-			IgnoreWS:     true,
-			Jobs:         runtime.NumCPU(),
-			RepoDir:      repoDir,
-			Progress:     false,
+		opts.WithComment = fieldSel.NeedComment
+		opts.WithMessage = fieldSel.NeedMessage
+
+		if err := engineopts.NormalizeAndValidate(&opts); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		if opts.WithComment && opts.WithMessage &&
-			opts.TruncAll == 0 && opts.TruncComment == 0 && opts.TruncMessage == 0 {
-			opts.TruncAll = 120
-		}
+
 		res, err := engine.Run(opts)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -672,31 +649,25 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 		res.HasComment = fieldSel.ShowComment
 		res.HasMessage = fieldSel.ShowMessage
 		res.HasAge = fieldSel.ShowAge
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(res)
+
+		switch outFormat {
+		case "json":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(res)
+		case "tsv":
+			w.Header().Set("Content-Type", "text/tab-separated-values; charset=utf-8")
+			printTSV(w, res, fieldSel)
+		default:
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			printTable(w, res, fieldSel)
+		}
 	}
 }
 
-func parseIntParam(q map[string][]string, key string) (int, error) {
-	vals, ok := q[key]
-	if !ok || len(vals) == 0 {
-		return 0, nil
-	}
-	raw := strings.TrimSpace(vals[0])
-	if raw == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid integer value for %s: %q", key, raw)
-	}
-	return n, nil
-}
-
-func printTSV(res *engine.Result, sel FieldSelection) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
+func printTSV(out io.Writer, res *engine.Result, sel FieldSelection) {
+	tw := tabwriter.NewWriter(out, 0, 8, 0, '\t', 0) // tabs only
 	write := func(text string) {
-		mustFprintln(w, text)
+		mustFprintln(tw, text)
 	}
 	headers := make([]string, len(sel.Fields))
 	for i, f := range sel.Fields {
@@ -710,15 +681,15 @@ func printTSV(res *engine.Result, sel FieldSelection) {
 		}
 		write(strings.Join(row, "\t"))
 	}
-	if err := w.Flush(); err != nil {
+	if err := tw.Flush(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func printTable(res *engine.Result, sel FieldSelection) {
-	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+func printTable(out io.Writer, res *engine.Result, sel FieldSelection) {
+	tw := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
 	write := func(text string) {
-		mustFprintln(w, text)
+		mustFprintln(tw, text)
 	}
 	headers := make([]string, len(sel.Fields))
 	for i, f := range sel.Fields {
@@ -732,7 +703,7 @@ func printTable(res *engine.Result, sel FieldSelection) {
 		}
 		write(strings.Join(row, "\t"))
 	}
-	if err := w.Flush(); err != nil {
+	if err := tw.Flush(); err != nil {
 		log.Fatal(err)
 	}
 }

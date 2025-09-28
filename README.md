@@ -123,6 +123,19 @@ make build
 - `--sort key[,key...]`: multi-level sort. Prefix with `-` for descending, `+` (or nothing) for ascending.
   Supported keys: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location` (`file,line`).
 
+### Shared input validation (CLI & Web API)
+
+The CLI flags and the `/api/scan` query parameters share the same validation rules:
+
+| Parameter | Accepted values | Notes |
+|-----------|-----------------|-------|
+| `type` | `todo`, `fixme`, `both` | Case-insensitive. |
+| `mode` | `last`, `first` | Case-insensitive. |
+| `output` | `table`, `tsv`, `json` | CLI default: `table`. Web default: `json`. |
+| `with_comment`, `with_message`, `with_age`, `ignore_ws` | `1/0`, `true/false`, `yes/no`, `on/off` | Empty value means “not specified”. |
+| `jobs` | `1` – `64` | Values outside the range are rejected. |
+| `truncate`, `truncate_comment`, `truncate_message` | `0` or greater integers | Negative values are rejected. |
+
 ### Progress / blame behaviour
 
 - `--no-progress` / `--progress`: disable or force the progress display

@@ -124,6 +124,19 @@ make build
 - `--sort key[,key...]` : 多段ソート。`-` で降順、`+`（または省略）で昇順を指定。
   利用可能キー: `age`, `date`, `author`, `email`, `type`, `file`, `line`, `commit`, `location`（`file,line`）。
 
+### 入力バリデーション（CLI / Web 共通）
+
+CLI フラグと `/api/scan` のクエリパラメータは共通のバリデーションルールで解釈されます。
+
+| パラメータ | 受理する値 | 備考 |
+|------------|------------|------|
+| `type` | `todo`, `fixme`, `both` | 大文字小文字は区別しません。 |
+| `mode` | `last`, `first` | 大文字小文字は区別しません。 |
+| `output` | `table`, `tsv`, `json` | CLI の既定は `table`、Web API の既定は `json`。 |
+| `with_comment`, `with_message`, `with_age`, `ignore_ws` | `1/0`, `true/false`, `yes/no`, `on/off` | 空文字は「未指定」とみなします。 |
+| `jobs` | `1` 〜 `64` | 範囲外の値はエラーになります。 |
+| `truncate`, `truncate_comment`, `truncate_message` | 0 以上の整数 | 負の値はエラーになります。 |
+
 ### 進捗・ blame の振る舞い
 
 - `--no-progress` / `--progress` : 進捗表示を抑止／強制

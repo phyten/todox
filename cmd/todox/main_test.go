@@ -18,11 +18,6 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	if err != nil {
 		t.Fatalf("パイプの作成に失敗しました: %v", err)
 	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() {
-		os.Stdout = oldStdout
-	})
 
 	res := &engine.Result{
 		HasComment: true,
@@ -35,7 +30,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
 
-	printTSV(res, sel)
+	printTSV(w, res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -53,11 +48,6 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 	if err != nil {
 		t.Fatalf("パイプの作成に失敗しました: %v", err)
 	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() {
-		os.Stdout = oldStdout
-	})
 
 	res := &engine.Result{
 		HasComment: true,
@@ -69,7 +59,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
 
-	printTSV(res, sel)
+	printTSV(w, res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -94,11 +84,6 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 	if err != nil {
 		t.Fatalf("パイプの作成に失敗しました: %v", err)
 	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() {
-		os.Stdout = oldStdout
-	})
 
 	res := &engine.Result{
 		HasComment: true,
@@ -118,7 +103,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
 
-	printTable(res, sel)
+	printTable(w, res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -139,9 +124,6 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 	if err != nil {
 		t.Fatalf("パイプの作成に失敗しました: %v", err)
 	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	res := &engine.Result{
 		Items: []engine.Item{{
@@ -163,7 +145,7 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 
 	res.HasAge = sel.ShowAge
 
-	printTSV(res, sel)
+	printTSV(w, res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -184,9 +166,6 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	if err != nil {
 		t.Fatalf("パイプの作成に失敗しました: %v", err)
 	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	res := &engine.Result{
 		Items: []engine.Item{{
@@ -208,7 +187,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 
 	res.HasAge = sel.ShowAge
 
-	printTable(res, sel)
+	printTable(w, res, sel)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -281,100 +260,6 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 	}
 	if !strings.Contains(text, "(unknown location) [git] mystery") {
 		t.Fatalf("不明位置の行が期待通りではありません: %q", text)
-	}
-}
-
-func TestParseBoolParamは受け入れ値を解釈する(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]struct {
-		value   string
-		want    bool
-		wantErr bool
-	}{
-		"未指定は偽":    {want: false},
-		"空文字は偽":    {value: "", want: false},
-		"1は真":      {value: "1", want: true},
-		"trueは真":   {value: "true", want: true},
-		"TRUEは真":   {value: "TRUE", want: true},
-		"yesは真":    {value: "yes", want: true},
-		"onは真":     {value: "on", want: true},
-		"0は偽":      {value: "0", want: false},
-		"falseは偽":  {value: "false", want: false},
-		"FALSEは偽":  {value: "FALSE", want: false},
-		"noは偽":     {value: "no", want: false},
-		"offは偽":    {value: "off", want: false},
-		"無効値はエラー":  {value: "maybe", wantErr: true},
-		"前後空白はトリム": {value: "  true  ", want: true},
-	}
-
-	for name, tc := range cases {
-		tc := tc
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			q := map[string][]string{}
-			if tc.value != "" || (tc.value == "" && name == "空文字は偽") {
-				q["flag"] = []string{tc.value}
-			}
-
-			got, err := parseBoolParam(q, "flag")
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("エラーを期待しましたが nil でした")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("予期しないエラー: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("結果が一致しません: got=%v want=%v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestParseIntParamは整数入力を検証する(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]struct {
-		value   string
-		want    int
-		wantErr bool
-	}{
-		"未指定は0":   {want: 0},
-		"空文字は0":   {value: "", want: 0},
-		"空白だけは0":  {value: "   ", want: 0},
-		"正の数":     {value: "120", want: 120},
-		"負の数も許容":  {value: "-1", want: -1},
-		"無効値はエラー": {value: "abc", wantErr: true},
-	}
-
-	for name, tc := range cases {
-		tc := tc
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			q := map[string][]string{}
-			if tc.value != "" || strings.Contains(name, "空文字") {
-				q["n"] = []string{tc.value}
-			}
-
-			got, err := parseIntParam(q, "n")
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("エラーを期待しましたが nil でした")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("予期しないエラー: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("結果が一致しません: got=%d want=%d", got, tc.want)
-			}
-		})
 	}
 }
 
