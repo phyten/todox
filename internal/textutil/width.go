@@ -8,11 +8,15 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+// ANSI escape sequences (covers common CSI and OSC forms).
+var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 func stripANSI(s string) string {
 	if s == "" {
 		return ""
+	}
+	if !strings.ContainsRune(s, 0x1b) {
+		return s
 	}
 	return ansiRe.ReplaceAllString(s, "")
 }
@@ -39,6 +43,9 @@ func TruncateByWidth(s string, w int, ellipsis string) string {
 	}
 	if w <= 0 {
 		return ""
+	}
+	if VisibleWidth(s) <= w {
+		return s
 	}
 	t := stripANSI(s)
 	g := uniseg.NewGraphemes(t)

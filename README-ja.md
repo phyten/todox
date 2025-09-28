@@ -128,7 +128,7 @@ make build
 - `--truncate-comment N` : COMMENT だけ（表示幅で）丸める
 - `--truncate-message N` : MESSAGE だけ（表示幅で）丸める
 
-表示幅は Unicode の wcwidth に準拠して計算され、結合文字や絵文字を壊しません。日本語端末などで曖昧幅を 2 として扱いたい場合は `TODOX_EASTASIAN=1` を設定してください。
+表示幅は Unicode の wcwidth に準拠して計算され、結合文字や絵文字を壊しません。日本語端末などで曖昧幅を 2 として扱いたい場合は `TODOX_EASTASIAN=1`（または `true`）を設定してください。
 
 ### 並び替え
 

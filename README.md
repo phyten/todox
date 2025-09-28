@@ -127,7 +127,7 @@ make build
 - `--truncate-comment N`: truncate only COMMENT (visible width)
 - `--truncate-message N`: truncate only MESSAGE (visible width)
 
-Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining marks) stay intact. Set `TODOX_EASTASIAN=1` to treat ambiguous-width characters as double-width for East Asian terminals.
+Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining marks) stay intact. Set `TODOX_EASTASIAN=1` (or `true`) to treat ambiguous-width characters as double-width for East Asian terminals.
 
 ### Sorting
 
