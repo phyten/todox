@@ -28,7 +28,8 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	fields := []string{"type", "author", "email", "date", "commit", "location", "comment", "message"}
+	printTSV(res, fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -57,7 +58,8 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	printTSV(res, engine.Options{}, false)
+	fields := []string{"type", "author", "email", "date", "commit", "location", "comment"}
+	printTSV(res, fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -101,7 +103,8 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, false)
+	fields := []string{"type", "author", "email", "date", "commit", "location", "comment"}
+	printTable(res, fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -139,7 +142,8 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTSV(res, engine.Options{}, true)
+	fields := []string{"type", "author", "email", "date", "age", "commit", "location"}
+	printTSV(res, fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -177,7 +181,8 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	printTable(res, engine.Options{}, true)
+	fields := []string{"type", "author", "email", "date", "age", "commit", "location"}
+	printTable(res, fields)
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -188,26 +193,84 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	if !strings.Contains(text, "AGE") {
 		t.Fatalf("AGE ヘッダーが含まれていません: %q", text)
 	}
-	if !strings.Contains(text, "  5    abcdef01") {
-		t.Fatalf("AGE 列の値が期待通りではありません: %q", text)
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("テーブル出力の行数が想定外です: %q", text)
+	}
+	if !strings.Contains(lines[1], "5") || !strings.Contains(lines[1], "abcdef01") {
+		t.Fatalf("AGE 列の値が期待通りではありません: %q", lines[1])
 	}
 }
 
-func TestSortItemsは年齢順に並び替える(t *testing.T) {
+func TestApplySortは複数キーで安定ソートする(t *testing.T) {
 	items := []engine.Item{
-		{AgeDays: 1, File: "b.go", Line: 30},
-		{AgeDays: 10, File: "a.go", Line: 20},
-		{AgeDays: 10, File: "a.go", Line: 10},
-		{AgeDays: 3, File: "c.go", Line: 5},
+		{AgeDays: 5, Author: "Bob", File: "b.go", Line: 10},
+		{AgeDays: 5, Author: "Alice", File: "a.go", Line: 20},
+		{AgeDays: 5, Author: "Alice", File: "a.go", Line: 5},
+		{AgeDays: 2, Author: "Alice", File: "c.go", Line: 1},
 	}
 
-	sortItems(items, "-age")
-
-	if items[0].Line != 10 || items[1].Line != 20 {
-		t.Fatalf("AGE 降順＋ファイル/行のタイブレークが期待通りではありません: %+v", items[:2])
+	spec, err := ParseSortSpec("author,-date,line")
+	if err != nil {
+		t.Fatalf("ParseSortSpec failed: %v", err)
 	}
-	if items[len(items)-1].AgeDays != 1 {
-		t.Fatalf("最も若い項目が末尾に来ていません: %+v", items)
+	ApplySort(items, spec)
+
+	if items[0].Line != 1 {
+		t.Fatalf("最初の要素が期待と異なります: %+v", items[0])
+	}
+	if items[1].Line != 5 || items[2].Line != 20 {
+		t.Fatalf("行番号の安定ソートが期待通りではありません: %+v", items[:3])
+	}
+	if items[len(items)-1].Author != "Bob" {
+		t.Fatalf("最後の要素がBobではありません: %+v", items)
+	}
+}
+
+func TestParseSortSpecはエイリアスと向きを解釈する(t *testing.T) {
+	spec, err := ParseSortSpec("location,-date")
+	if err != nil {
+		t.Fatalf("ParseSortSpec failed: %v", err)
+	}
+	if len(spec.Keys) != 3 {
+		t.Fatalf("期待するキー数と一致しません: %+v", spec.Keys)
+	}
+	if spec.Keys[0] != (SortKey{Name: "file", Desc: false}) || spec.Keys[1] != (SortKey{Name: "line", Desc: false}) {
+		t.Fatalf("location が file,line に展開されていません: %+v", spec.Keys)
+	}
+	if spec.Keys[2] != (SortKey{Name: "age", Desc: false}) {
+		t.Fatalf("-date が age 昇順として解釈されていません: %+v", spec.Keys[2])
+	}
+}
+
+func TestParseSortSpecは未知キーを拒否する(t *testing.T) {
+	if _, err := ParseSortSpec("unknown"); err == nil {
+		t.Fatal("未知キーでエラーが発生しませんでした")
+	}
+}
+
+func TestParseFieldSpecは列指定を正規化する(t *testing.T) {
+	sel, err := ParseFieldSpec("TYPE,comment,age_days,comment")
+	if err != nil {
+		t.Fatalf("ParseFieldSpec failed: %v", err)
+	}
+	if !sel.Provided {
+		t.Fatal("Provided が true ではありません")
+	}
+	if !sel.HasComment || !sel.HasAge {
+		t.Fatalf("comment/age の検出に失敗しました: %+v", sel)
+	}
+	if len(sel.Fields) != 3 {
+		t.Fatalf("重複除去ができていません: %+v", sel.Fields)
+	}
+	if sel.Fields[0] != "type" || sel.Fields[1] != "comment" || sel.Fields[2] != "age" {
+		t.Fatalf("フィールドの正規化が期待通りではありません: %+v", sel.Fields)
+	}
+}
+
+func TestParseFieldSpecは未知列を拒否する(t *testing.T) {
+	if _, err := ParseFieldSpec("unknown"); err == nil {
+		t.Fatal("未知列でエラーが発生しませんでした")
 	}
 }
 

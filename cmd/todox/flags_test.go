@@ -89,14 +89,30 @@ func TestParseScanArgsWithAgeAndSort(t *testing.T) {
 	if !cfg.withAge {
 		t.Fatal("--with-age should enable AGE column")
 	}
-	if cfg.sortKey != "-age" {
-		t.Fatalf("sortKey mismatch: got %q", cfg.sortKey)
+	if len(cfg.sortSpec.Keys) != 1 {
+		t.Fatalf("sortSpec should have 1 key: %+v", cfg.sortSpec)
+	}
+	if cfg.sortSpec.Keys[0] != (SortKey{Name: "age", Desc: true}) {
+		t.Fatalf("sortSpec first key mismatch: %+v", cfg.sortSpec.Keys[0])
 	}
 }
 
 func TestParseScanArgsRejectsUnknownSort(t *testing.T) {
-	if _, err := parseScanArgs([]string{"--sort", "author"}, "en"); err == nil {
+	if _, err := parseScanArgs([]string{"--sort", "unknown"}, "en"); err == nil {
 		t.Fatal("expected error for unsupported --sort value")
+	}
+}
+
+func TestParseScanArgsFields指定はコメント列を有効化する(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--fields", "type,comment"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if !cfg.opts.WithComment {
+		t.Fatal("fields指定でコメントが有効化されていません")
+	}
+	if !cfg.fieldSel.Provided || !containsField(cfg.fieldSel.Fields, "comment") {
+		t.Fatalf("fieldSelが期待通りではありません: %+v", cfg.fieldSel)
 	}
 }
 
