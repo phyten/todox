@@ -94,7 +94,7 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 		out.TruncMessage = n
 	}
 	if raw, ok := lastLiteralValue(q["jobs"]); ok {
-		n, err := parseInt(raw, "jobs")
+		n, err := ParseIntInRange(raw, "jobs", 1, maxJobs)
 		if err != nil {
 			return out, err
 		}

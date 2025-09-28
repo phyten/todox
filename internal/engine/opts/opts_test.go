@@ -191,6 +191,11 @@ func TestApplyWebQueryToOptions(t *testing.T) {
 	if _, err := ApplyWebQueryToOptions(base, q); err == nil {
 		t.Fatal("expected error for invalid boolean")
 	}
+
+	q.Set("jobs", "0")
+	if _, err := ApplyWebQueryToOptions(base, q); err == nil {
+		t.Fatal("expected error for jobs below range")
+	}
 }
 
 func TestSplitMulti(t *testing.T) {

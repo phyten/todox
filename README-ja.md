@@ -73,6 +73,8 @@ make build
 # -> http://localhost:8080 （API: /api/scan）
 ```
 
+Web フォームはサーバー既定に合わせています。`ignore whitespace` チェックは最初から ON（= `ignore_ws=true`）で、`jobs` 欄は空欄（自動）。既定のままならクエリに含めず、変更したときだけパラメータを送信します。
+
 ---
 
 ## Dev Container（推奨の開発環境）
@@ -128,6 +130,7 @@ make build
 
 - `--no-progress` / `--progress` : 進捗表示を抑止／強制
 - `--no-ignore-ws` : `git blame` で `-w` を使わない（空白変更も最新扱い）
+- Web API: `ignore_ws=0` で空白のみの変更も追跡し、`jobs=<n>` (1〜64) でワーカー数を制限できます
 
 ### ヘルプ・言語設定
 
