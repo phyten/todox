@@ -11,11 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/example/todox/internal/engine"
+	engineopts "github.com/example/todox/internal/engine/opts"
 	"github.com/example/todox/internal/util"
 )
 
@@ -67,7 +67,11 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
 	sortKey := fs.String("sort", "", "sort order (e.g. author,-date; default: file,line)")
 	lang := fs.String("lang", "", "help language (en|ja)")
-	jobs := fs.Int("jobs", runtime.NumCPU(), "max parallel workers")
+	defaultJobs := runtime.NumCPU()
+	if defaultJobs > 64 {
+		defaultJobs = 64
+	}
+	jobs := fs.Int("jobs", defaultJobs, "max parallel workers")
 	repo := fs.String("repo", ".", "repo root (default: current dir)")
 
 	shortMap := map[string]string{
@@ -157,20 +161,20 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		cfg.helpLang = "en"
 	}
 
-	cfg.opts = engine.Options{
-		Type:         *typ,
-		Mode:         *mode,
-		AuthorRegex:  *author,
-		WithComment:  *withComment,
-		WithMessage:  *withMessage,
-		TruncAll:     *truncAll,
-		TruncComment: *truncComment,
-		TruncMessage: *truncMessage,
-		IgnoreWS:     !*noIgnoreWS,
-		Jobs:         *jobs,
-		RepoDir:      *repo,
-		Progress:     util.ShouldShowProgress(*forceProg, *noProgress),
-	}
+	cfg.opts = engineopts.Defaults(*repo)
+	cfg.opts.Type = *typ
+	cfg.opts.Mode = *mode
+	cfg.opts.AuthorRegex = *author
+	cfg.opts.WithComment = *withComment
+	cfg.opts.WithMessage = *withMessage
+	cfg.opts.TruncAll = *truncAll
+	cfg.opts.TruncComment = *truncComment
+	cfg.opts.TruncMessage = *truncMessage
+	cfg.opts.IgnoreWS = !*noIgnoreWS
+	cfg.opts.Jobs = *jobs
+	cfg.opts.RepoDir = *repo
+	cfg.opts.Progress = util.ShouldShowProgress(*forceProg, *noProgress)
+
 	cfg.output = *output
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
@@ -210,6 +214,23 @@ func scanCmd(args []string) {
 	cfg.opts.WithComment = fieldSel.NeedComment
 	cfg.opts.WithMessage = fieldSel.NeedMessage
 
+	if err := engineopts.NormalizeAndValidate(&cfg.opts); err != nil {
+		log.Fatal(err)
+	}
+
+	outFmt := strings.ToLower(cfg.output)
+	var outputMode string
+	switch outFmt {
+	case "", "table":
+		outputMode = "table"
+	case "tsv":
+		outputMode = "tsv"
+	case "json":
+		outputMode = "json"
+	default:
+		log.Fatalf("invalid --output: %s", cfg.output)
+	}
+
 	res, err := engine.Run(cfg.opts)
 	if err != nil {
 		log.Fatal(err)
@@ -220,7 +241,7 @@ func scanCmd(args []string) {
 	res.HasMessage = fieldSel.ShowMessage
 	res.HasAge = fieldSel.ShowAge
 
-	switch strings.ToLower(cfg.output) {
+	switch outputMode {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -570,70 +591,30 @@ func serveCmd(args []string) {
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func get(q map[string][]string, k, def string) string {
-	if v := q[k]; len(v) > 0 && v[0] != "" {
-		return v[0]
-	}
-	return def
-}
-
-func parseBoolParam(q map[string][]string, key string) (bool, error) {
-	vals, ok := q[key]
-	if !ok || len(vals) == 0 {
-		return false, nil
-	}
-	raw := strings.TrimSpace(vals[0])
-	if raw == "" {
-		return false, nil
-	}
-
-	switch strings.ToLower(raw) {
-	case "1", "true", "yes", "on":
-		return true, nil
-	case "0", "false", "no", "off":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid value for %s: %q", key, raw)
-	}
-}
-
 func apiScanHandler(repoDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 
-		withComment, err := parseBoolParam(q, "with_comment")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		withMessage, err := parseBoolParam(q, "with_message")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		withAge, err := parseBoolParam(q, "with_age")
+		base := engineopts.Defaults(repoDir)
+		base.Progress = false
+
+		optVals, err := engineopts.ApplyWebQueryToOptions(base, q)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		truncAll, err := parseIntParam(q, "truncate")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		truncComment, err := parseIntParam(q, "truncate_comment")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		truncMessage, err := parseIntParam(q, "truncate_message")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		withAge := false
+		if raw := strings.TrimSpace(q.Get("with_age")); raw != "" {
+			v, err := engineopts.ParseBool(raw, "with_age")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			withAge = v
 		}
 
-		fieldSel, err := ResolveFields(q.Get("fields"), withComment, withMessage, withAge)
+		fieldSel, err := ResolveFields(q.Get("fields"), optVals.WithComment, optVals.WithMessage, withAge)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -645,25 +626,20 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			return
 		}
 
-		opts := engine.Options{
-			Type:         get(q, "type", "both"),
-			Mode:         get(q, "mode", "last"),
-			AuthorRegex:  q.Get("author"),
-			WithComment:  fieldSel.NeedComment,
-			WithMessage:  fieldSel.NeedMessage,
-			TruncAll:     truncAll,
-			TruncComment: truncComment,
-			TruncMessage: truncMessage,
-			IgnoreWS:     true,
-			Jobs:         runtime.NumCPU(),
-			RepoDir:      repoDir,
-			Progress:     false,
+		optVals.WithComment = fieldSel.NeedComment
+		optVals.WithMessage = fieldSel.NeedMessage
+
+		if optVals.WithComment && optVals.WithMessage &&
+			optVals.TruncAll == 0 && optVals.TruncComment == 0 && optVals.TruncMessage == 0 {
+			optVals.TruncAll = 120
 		}
-		if opts.WithComment && opts.WithMessage &&
-			opts.TruncAll == 0 && opts.TruncComment == 0 && opts.TruncMessage == 0 {
-			opts.TruncAll = 120
+
+		if err := engineopts.NormalizeAndValidate(&optVals); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		res, err := engine.Run(opts)
+
+		res, err := engine.Run(optVals)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -675,22 +651,6 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	}
-}
-
-func parseIntParam(q map[string][]string, key string) (int, error) {
-	vals, ok := q[key]
-	if !ok || len(vals) == 0 {
-		return 0, nil
-	}
-	raw := strings.TrimSpace(vals[0])
-	if raw == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid integer value for %s: %q", key, raw)
-	}
-	return n, nil
 }
 
 func printTSV(res *engine.Result, sel FieldSelection) {

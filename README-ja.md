@@ -138,6 +138,31 @@ make build
 
 ヘルプ：`./bin/todox -h`（英語/日本語の両対応、例付き）
 
+### 入力バリデーション（CLI / Web 共通）
+
+CLI フラグと `/api/scan` のクエリ文字列は共通レイヤで正規化されます。主なルール:
+
+- 真偽値は `1/0`, `true/false`, `yes/no`, `on/off` をすべて受理（大文字小文字は不問）。未指定や空文字は既定値を維持します。
+- 不正な値は CLI ではエラー終了、Web API では `400 Bad Request` を返します。
+
+#### 列挙型パラメータ
+
+| 対象 | CLI フラグ / API キー | 受理値 | 既定値 |
+| --- | --- | --- | --- |
+| 検索対象 | `--type` / `type` | `todo`, `fixme`, `both` | `both` |
+| 作者特定モード | `--mode` / `mode` | `last`, `first` | `last` |
+| 出力形式 | `--output` / `output` | `table`, `tsv`, `json` | `table` |
+
+#### 数値パラメータ
+
+| 対象 | CLI フラグ / API キー | 許容範囲 | 既定値 | 備考 |
+| --- | --- | --- | --- | --- |
+| 並列ワーカー数 | `--jobs` / `jobs` | `1` 〜 `64` | `min(runtime.NumCPU(), 64)` | 65 以上はエラー。 |
+| コメント/メッセージのトランケート | `--truncate`, `--truncate-comment`, `--truncate-message` / `truncate*` | `0` 以上 | `0` | `--full` は従来どおり未指定なら `--truncate=120` を補完します。 |
+
+- `ignore_ws` の既定は `true`（CLI: `--no-ignore-ws` で反転、Web API: `ignore_ws=0`）。
+- Web API の `with_comment` / `with_message` なども CLI と同じ真偽値ルールです。
+
 ---
 
 ## 注意・既知の制限

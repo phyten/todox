@@ -137,6 +137,31 @@ make build
 
 Full help: `./bin/todox -h` (bilingual output and examples).
 
+### Shared validation (CLI & Web API)
+
+Both the CLI flags and the `/api/scan` query parameters are parsed through the same normalization layer. Key rules:
+
+- Boolean parameters accept `1/0`, `true/false`, `yes/no`, `on/off` (case-insensitive). Omitted or empty values keep the default.
+- Invalid values cause a CLI error (non-zero exit) or a `400 Bad Request` response from the API.
+
+#### Enumerations
+
+| Option | CLI flag / API key | Allowed values | Default |
+| --- | --- | --- | --- |
+| Scan target | `--type` / `type` | `todo`, `fixme`, `both` | `both` |
+| Author lookup mode | `--mode` / `mode` | `last`, `first` | `last` |
+| Output format | `--output` / `output` | `table`, `tsv`, `json` | `table` |
+
+#### Numeric ranges
+
+| Option | CLI flag / API key | Allowed range | Default | Notes |
+| --- | --- | --- | --- | --- |
+| Parallel workers | `--jobs` / `jobs` | `1` – `64` | `min(runtime.NumCPU(), 64)` | Values above 64 are rejected. |
+| Comment/message truncation | `--truncate`, `--truncate-comment`, `--truncate-message` / `truncate*` | `0` or greater | `0` | `--full` keeps its shortcut behaviour and sets `--truncate=120` when no other truncate flags are provided. |
+
+- `ignore_ws` defaults to `true` (CLI: `--no-ignore-ws` flips it, Web API: `ignore_ws=0`).
+- Web API booleans such as `with_comment`/`with_message` map directly to their CLI counterparts.
+
 ---
 
 ## Caveats & known limitations
