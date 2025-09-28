@@ -13,13 +13,22 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/phyten/todox/internal/engine"
 	engineopts "github.com/phyten/todox/internal/engine/opts"
+	"github.com/phyten/todox/internal/textutil"
 	"github.com/phyten/todox/internal/util"
 )
 
 func main() {
 	log.SetFlags(0)
+	envEA := strings.TrimSpace(os.Getenv("TODOX_EASTASIAN"))
+	if envEA == "1" || strings.EqualFold(envEA, "true") {
+		runewidth.EastAsianWidth = true
+	} else {
+		runewidth.EastAsianWidth = false
+	}
+	runewidth.DefaultCondition = runewidth.NewCondition()
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		serveCmd(os.Args[2:])
 		return
@@ -774,24 +783,55 @@ func printTSV(res *engine.Result, sel FieldSelection) {
 }
 
 func printTable(res *engine.Result, sel FieldSelection) {
-	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-	write := func(text string) {
-		mustFprintln(w, text)
+	colCount := len(sel.Fields)
+	widths := make([]int, colCount)
+	for i, f := range sel.Fields {
+		widths[i] = textutil.VisibleWidth(f.Header)
 	}
-	headers := make([]string, len(sel.Fields))
+	rows := make([][]string, len(res.Items))
+	for rowIdx, it := range res.Items {
+		row := make([]string, colCount)
+		for colIdx, f := range sel.Fields {
+			val := sanitizeField(formatFieldValue(it, f.Key))
+			row[colIdx] = val
+			if w := textutil.VisibleWidth(val); w > widths[colIdx] {
+				widths[colIdx] = w
+			}
+		}
+		rows[rowIdx] = row
+	}
+	headers := make([]string, colCount)
 	for i, f := range sel.Fields {
 		headers[i] = f.Header
 	}
-	write(strings.Join(headers, "\t"))
-	for _, it := range res.Items {
-		row := make([]string, len(sel.Fields))
-		for i, f := range sel.Fields {
-			row[i] = sanitizeField(formatFieldValue(it, f.Key))
+	render := func(cells []string) string {
+		var b strings.Builder
+		for i, cell := range cells {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			width := widths[i]
+			truncated := textutil.TruncateByWidth(cell, width, "…")
+			if isRightAligned(sel.Fields[i].Key) {
+				b.WriteString(textutil.PadLeft(truncated, width))
+			} else {
+				b.WriteString(textutil.PadRight(truncated, width))
+			}
 		}
-		write(strings.Join(row, "\t"))
+		return b.String()
 	}
-	if err := w.Flush(); err != nil {
-		log.Fatal(err)
+	mustFprintln(os.Stdout, render(headers))
+	for _, row := range rows {
+		mustFprintln(os.Stdout, render(row))
+	}
+}
+
+func isRightAligned(key string) bool {
+	switch key {
+	case "age", "date", "commit":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/phyten/todox/internal/textutil"
 	"github.com/phyten/todox/internal/util"
 )
 
@@ -237,13 +237,13 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
 		it.AgeDays = ageDays(opts.Now, authorTime)
 		if opts.WithMessage {
-			it.Message = truncateRunes(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
+			it.Message = truncateDisplayWidth(s, effectiveTrunc(opts.TruncMessage, opts.TruncAll))
 		}
 	}
 
 	if opts.WithComment {
 		cr := extractComment(m.text, opts.Type)
-		it.Comment = truncateRunes(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
+		it.Comment = truncateDisplayWidth(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
 	}
 
 	return it, errs
@@ -391,18 +391,17 @@ func extractComment(text, typ string) string {
 	return text[pos:]
 }
 
-func truncateRunes(s string, n int) string {
+func truncateDisplayWidth(s string, n int) string {
 	if n <= 0 {
 		return s
 	}
-	if utf8.RuneCountInString(s) <= n {
+	if textutil.VisibleWidth(s) <= n {
 		return s
 	}
-	rs := []rune(s)
-	if n <= 1 {
-		return "…"
+	if out := textutil.TruncateByWidth(s, n, "…"); out != "" {
+		return out
 	}
-	return string(rs[:n-1]) + "…"
+	return textutil.TruncateByWidth(s, n, "")
 }
 
 func effectiveTrunc(specific, all int) int {

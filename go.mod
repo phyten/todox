@@ -2,7 +2,11 @@ module github.com/phyten/todox
 
 go 1.22
 
-require github.com/chromedp/chromedp v0.10.1
+require (
+	github.com/chromedp/chromedp v0.10.1
+	github.com/mattn/go-runewidth v0.0.17
+	github.com/rivo/uniseg v0.4.7
+)
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20241003230502-a4a8f7c660df // indirect

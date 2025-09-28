@@ -123,9 +123,11 @@ make build
 
 ### Truncation controls
 
-- `--truncate N`: truncate both COMMENT and MESSAGE to `N` characters (0 = unlimited)
-- `--truncate-comment N`: truncate only COMMENT
-- `--truncate-message N`: truncate only MESSAGE
+- `--truncate N`: truncate both COMMENT and MESSAGE to `N` columns of visible width (0 = unlimited)
+- `--truncate-comment N`: truncate only COMMENT (visible width)
+- `--truncate-message N`: truncate only MESSAGE (visible width)
+
+Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining marks) stay intact. Set `TODOX_EASTASIAN=1` (or `true`) to treat ambiguous-width characters as double-width for East Asian terminals.
 
 ### Sorting
 
@@ -162,7 +164,7 @@ Both the CLI flags and the `/api/scan` query parameters share the same normaliza
 | `--exclude`, `exclude` | Same as above | `:(exclude)` / `:!` prefixes are preserved; otherwise `:(glob,exclude)` is added internally. |
 | `--path-regex`, `path_regex` | Go regular expressions | Each entry must compile. Invalid patterns return an error. |
 | `--exclude-typical`, `exclude_typical` | Boolean (same literals as other flags) | Enables the built-in set: `vendor/**`, `node_modules/**`, `dist/**`, `build/**`, `target/**`, `*.min.*`. |
-| `--truncate`, `--truncate-comment`, `--truncate-message` (and the API equivalents) | Integers ≥ 0 | Negative values are rejected. When both COMMENT and MESSAGE columns are enabled and no truncate is supplied, a default of 120 runes is applied. |
+| `--truncate`, `--truncate-comment`, `--truncate-message` (and the API equivalents) | Integers ≥ 0 | Negative values are rejected. When both COMMENT and MESSAGE columns are enabled and no truncate is supplied, a default of 120 display columns is applied. |
 
 Default for `jobs`: `min(runtime.NumCPU(), 64)` (number of CPU cores capped at 64).
 
