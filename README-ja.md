@@ -16,8 +16,8 @@
 - 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--with-age`（AGE 列を追加）、`--full`
 - 表示幅制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
-- 進捗表示：TTY のみ stderr に 1 行上書き（`--no-progress` あり）
-- Web：`todox serve` で簡易 UI と JSON API
+- 進捗表示：TTY のみ stderr に 1 行上書き、ETA/P90 を平滑化して表示（`--no-progress` あり）
+- Web：`todox serve` で簡易 UI・JSON API・`/api/scan/stream` によるストリーミング進捗
 
 > 実装の詳細や AI と協働する運用は [`AGENTS.md`](./AGENTS.md) を参照してください。
 

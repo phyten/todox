@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -16,8 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/textutil"
-	"github.com/phyten/todox/internal/util"
 )
 
 var reLine = regexp.MustCompile(`:(\d+):`) // first :<num>:
@@ -87,7 +88,19 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	out := make([]Item, len(matches))
-	prog := util.NewProgress(len(matches), opts.Progress)
+
+	var observers []progress.Observer
+	if opts.ProgressObserver != nil {
+		observers = append(observers, opts.ProgressObserver)
+	}
+	if opts.Progress {
+		observers = append(observers, progress.NewAutoObserver(os.Stderr))
+	}
+	observer := progress.NewMultiObserver(observers...)
+	estimator := progress.NewEstimator(len(matches), progress.Config{})
+	if snap, changed := estimator.Stage(progress.StageAttr); changed {
+		observer.Publish(snap)
+	}
 	var errsMu sync.Mutex
 	var errs []ItemError
 
@@ -127,7 +140,9 @@ func Run(opts Options) (*Result, error) {
 				}
 			}
 			out[j.idx] = item
-			prog.Advance()
+			if snap, notify := estimator.Advance(1); notify {
+				observer.Publish(snap)
+			}
 		}
 	}
 
@@ -144,7 +159,10 @@ func Run(opts Options) (*Result, error) {
 	}
 	close(jobs)
 	wg.Wait()
-	prog.Done()
+
+	finalSnap := estimator.Complete()
+	observer.Publish(finalSnap)
+	observer.Done(finalSnap)
 
 	// compact skipped
 	final := out[:0]
