@@ -16,6 +16,7 @@
 - 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--with-age`（AGE 列を追加）、`--full`
 - 表示幅制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
+- 表の色付け：`--color {auto|always|never}`（`NO_COLOR` / `CLICOLOR` 等を自動検出）
 - 進捗表示：TTY のみ stderr に 1 行上書き、ETA/P90 を平滑化して表示（`--no-progress` あり）
 - Web：`todox serve` で簡易 UI・JSON API・`/api/scan/stream` によるストリーミング進捗
 
@@ -111,6 +112,30 @@ make build
 
 - `-o, --output {table|tsv|json}` : 出力フォーマット（既定: table）
 - `--fields type,author,date,...` : table/TSV の列順を指定（カンマ区切り。`--with-*` より優先）
+- `--color {auto|always|never}` : 表形式に色付けするモード（既定: auto）
+
+### 色付けと環境変数
+
+- `--color auto` は端末能力を自動判定します。
+  - `NO_COLOR` が設定されていれば常に無効（強制フラグより優先）。
+  - `CLICOLOR=0` で自動判定を無効化（こちらも強制フラグより優先）。
+  - `CLICOLOR_FORCE` / `FORCE_COLOR` に "0" 以外の値が入っていれば強制有効。
+  - `TERM=dumb` の場合は常に無効（他の環境変数より優先）。
+  - 上記以外では `stdout` が TTY かどうかで判断します（stderr の TTY は参照しません）。
+- カラープロファイルも自動判定します。
+  - `COLORTERM=truecolor|24bit` → AGE 列を True Color グラデーションで表示。
+  - `TERM=*256color` → ANSI 256 色グラデーション。
+  - それ以外は 8 色パレットでバケット化（TODO=青, FIXME=赤, AGE は段階色）。
+- AGE のグラデーションはリポジトリに応じて自動スケーリングされます。年齢の 95 パーセンタイル（下限 120 日）を
+  「最も赤い値」として扱い、極端な古い TODO が全体を赤一色にしないよう調整しています。
+- 色付き出力をパイプする場合は ANSI エスケープを解釈できるページャ（例: `less -R`）を利用してください。
+
+```
+todox --with-age --color always | less -R
+```
+- グラデーション付きのサンプル出力:
+
+![色付きテーブルの例](docs/color-table.png)
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
 
