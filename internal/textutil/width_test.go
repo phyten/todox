@@ -52,6 +52,22 @@ func TestTruncateByWidth(t *testing.T) {
 	}
 }
 
+func TestStripANSI(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "plain", want: "plain"},
+		{in: "\x1b[31mRed\x1b[0m", want: "Red"},
+		{in: "\x1b]8;;https://example.com\x07link\x1b]8;;\x07", want: "link"},
+	}
+	for _, tc := range cases {
+		if got := StripANSI(tc.in); got != tc.want {
+			t.Fatalf("StripANSI(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestPadHelpers(t *testing.T) {
 	setEastAsianWidth(t, false)
 	if got := VisibleWidth(PadRight("あ", 6)); got != 6 {
