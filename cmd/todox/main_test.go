@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phyten/todox/internal/engine"
+	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
 )
 
@@ -119,7 +120,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
 
-	printTable(res, sel)
+	printTable(res, sel, tableColorConfig{})
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -180,6 +181,42 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 	}
 }
 
+func TestPrintTSVは常に非カラー(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:   "TODO",
+			Author: "No Color",
+			File:   "main.go",
+			Line:   1,
+		}},
+	}
+
+	sel, err := ResolveFields("type,author", false, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTSV(res, sel)
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if textutil.StripANSI(text) != text {
+		t.Fatalf("TSV 出力に ANSI エスケープが含まれています: %q", text)
+	}
+}
+
 func TestPrintTableはAGE列を表示できる(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -209,7 +246,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 
 	res.HasAge = sel.ShowAge
 
-	printTable(res, sel)
+	printTable(res, sel, tableColorConfig{})
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -250,7 +287,7 @@ func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
 
-	printTable(res, sel)
+	printTable(res, sel, tableColorConfig{})
 	_ = w.Close()
 
 	out, err := io.ReadAll(r)
@@ -293,6 +330,93 @@ func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
 
 	if w1, w2 := textutil.VisibleWidth(row1), textutil.VisibleWidth(row2); w1 != w2 {
 		t.Fatalf("行全体の表示幅が一致しません: row1=%d row2=%d", w1, w2)
+	}
+}
+
+func TestPrintTableはカラーを有効化するとANSIコードを含む(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:   "TODO",
+			Author: "Color Tester",
+			Email:  "color@example.com",
+			Date:   "2024-06-01",
+			File:   "main.go",
+			Line:   3,
+		}},
+	}
+
+	sel, err := ResolveFields("", false, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTable(res, sel, tableColorConfig{enabled: true, profile: termcolor.ProfileBasic8})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "\x1b[1;4mTYPE") {
+		t.Fatalf("ヘッダーの装飾が付与されていません: %q", text)
+	}
+	if !strings.Contains(text, "\x1b[34mTODO") {
+		t.Fatalf("TYPE 列に色が付与されていません: %q", text)
+	}
+}
+
+func TestTableColorNeverDisablesANSI(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("パイプの作成に失敗しました: %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	res := &engine.Result{
+		Items: []engine.Item{{
+			Kind:   "TODO",
+			Author: "Never Color",
+			File:   "a.go",
+			Line:   1,
+		}},
+	}
+
+	sel, err := ResolveFields("type,author", false, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+
+	printTable(res, sel, tableColorConfig{enabled: false, profile: termcolor.ProfileBasic8})
+	_ = w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("出力の読み込みに失敗しました: %v", err)
+	}
+	text := string(out)
+	if textutil.StripANSI(text) != text {
+		t.Fatalf("カラー無効時に ANSI エスケープが混入しました: %q", text)
+	}
+}
+
+func TestTableColorEnvNoColorBeatsForce(t *testing.T) {
+	mode := termcolor.DetectMode(os.Stdout, map[string]string{
+		"NO_COLOR":    "1",
+		"FORCE_COLOR": "1",
+	})
+	if mode != termcolor.ModeNever {
+		t.Fatalf("NO_COLOR should override FORCE_COLOR, got %v", mode)
 	}
 }
 

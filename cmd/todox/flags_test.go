@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/phyten/todox/internal/termcolor"
 )
 
 func TestParseScanArgsShortAliases(t *testing.T) {
@@ -134,9 +137,43 @@ func TestParseScanArgsFieldsFlag(t *testing.T) {
 		t.Fatalf("fields flag not captured: %q", cfg.fields)
 	}
 }
+
+func TestParseScanArgsColorFlag(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--color", "always"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if cfg.colorMode != termcolor.ModeAlways {
+		t.Fatalf("color mode mismatch: got %v", cfg.colorMode)
+	}
+	if _, err := parseScanArgs([]string{"--color", "rainbow"}, "en"); err == nil {
+		t.Fatal("invalid color value should error")
+	} else {
+		var uerr *usageError
+		if !errors.As(err, &uerr) {
+			t.Fatalf("invalid color should return usageError, got %T", err)
+		}
+	}
+}
 func TestParseScanArgsRejectsInvalidOutput(t *testing.T) {
 	if _, err := parseScanArgs([]string{"--output", "csv"}, "en"); err == nil {
 		t.Fatal("expected error for invalid output value")
+	}
+}
+
+func TestCLIRejectsInvalidColor(t *testing.T) {
+	out, code := runTodoxExpectError(t, "--color", "rainbow")
+	if code == 0 {
+		t.Fatalf("command succeeded unexpectedly: %s", out)
+	}
+	if code != 2 && !strings.Contains(out, "exit status 2") {
+		t.Fatalf("exit code mismatch: got=%d want=2 (output=%s)", code, out)
+	}
+	if !strings.Contains(out, "unknown color mode") {
+		t.Fatalf("error output missing detail: %s", out)
+	}
+	if !strings.Contains(out, "todox —") {
+		t.Fatalf("help text not printed: %s", out)
 	}
 }
 
@@ -174,4 +211,18 @@ func runTodox(t *testing.T, args ...string) string {
 		t.Fatalf("command failed: %v\noutput: %s", err, out)
 	}
 	return string(out)
+}
+
+func runTodoxExpectError(t *testing.T, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("command succeeded unexpectedly: %s", out)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("unexpected error type: %T (%v)", err, err)
+	}
+	return string(out), exitErr.ExitCode()
 }

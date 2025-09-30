@@ -13,6 +13,7 @@ identify **who introduced or last touched** those lines in seconds—either from
 - Extra columns: `--with-comment`, `--with-message`, `--with-age`, `--full` (shortcut for comment+message with truncation).
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
 - Output formats: `table`, `tsv`, `json`.
+- Color-aware tables: `--color {auto|always|never}` with automatic detection of `NO_COLOR`, `CLICOLOR`, and friends.
 - Progress bar: one-line TTY updates with smoothed ETA/P90 bands (disable with `--no-progress`).
 - Web mode: `todox serve` exposes a minimal UI plus a JSON API and streaming progress via `/api/scan/stream`.
 
@@ -110,6 +111,30 @@ make build
 
 - `-o, --output {table|tsv|json}`: choose the output format (default: table)
 - `--fields type,author,date,...`: choose the columns for table/TSV (comma separated; overrides `--with-*`)
+- `--color {auto|always|never}`: control terminal coloring for the table output (default: auto)
+
+### Color mode & environment variables
+
+- `--color auto` respects terminal capabilities:
+  - `NO_COLOR` disables colors (and wins over any force flags).
+  - `CLICOLOR=0` disables colors when auto-detected (also winning over force flags).
+  - `CLICOLOR_FORCE`/`FORCE_COLOR` force-enable colors when set to anything other than `"0"`.
+  - `TERM=dumb` disables colors regardless of other environment variables.
+  - Otherwise the CLI checks whether `stdout` is a TTY (stderr is ignored).
+- Color profiles are inferred automatically:
+  - `COLORTERM=truecolor|24bit` → True Color gradients for the AGE column.
+  - `TERM=*256color` → ANSI 256-color gradients.
+  - Other terminals fall back to the basic 8-color palette.
+- The AGE gradient scales itself to your repository. The 95th percentile of ages (with a minimum ceiling of 120 days)
+  is treated as "fully red" so that outliers do not drown out day-to-day differences.
+- When piping colored output, use a pager that preserves ANSI escapes, for example:
+
+```
+todox --with-age --color always | less -R
+```
+- Example output with gradients for AGE and colored TODO/FIXME markers:
+
+![Colorized table output](docs/color-table.png)
 
 > JSON output always includes an `age_days` field for each item.
 

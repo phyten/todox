@@ -6,6 +6,7 @@ require (
 	github.com/chromedp/chromedp v0.10.1
 	github.com/mattn/go-runewidth v0.0.17
 	github.com/rivo/uniseg v0.4.7
+	golang.org/x/term v0.26.0
 )
 
 require (
@@ -16,5 +17,5 @@ require (
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/sys v0.27.0 // indirect
 )

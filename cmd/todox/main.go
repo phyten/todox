@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -20,6 +22,7 @@ import (
 	"github.com/phyten/todox/internal/engine"
 	engineopts "github.com/phyten/todox/internal/engine/opts"
 	"github.com/phyten/todox/internal/progress"
+	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
 )
 
@@ -51,6 +54,25 @@ type scanConfig struct {
 	fields      string
 	showHelp    bool
 	helpLang    string
+	colorMode   termcolor.ColorMode
+}
+
+type usageError struct {
+	err error
+}
+
+func (u *usageError) Error() string {
+	if u == nil || u.err == nil {
+		return ""
+	}
+	return u.err.Error()
+}
+
+func (u *usageError) Unwrap() error {
+	if u == nil {
+		return nil
+	}
+	return u.err
 }
 
 type multiFlag struct {
@@ -100,6 +122,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	mode := fs.String("mode", "last", "last|first")
 	author := fs.String("author", "", "filter by author name/email (regexp)")
 	output := fs.String("output", "table", "table|tsv|json")
+	colorMode := fs.String("color", "auto", "color output for tables: auto|always|never")
 	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
 	withAge := fs.Bool("with-age", false, "show AGE column (table/tsv)")
@@ -241,6 +264,12 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.sortKey = *sortKey
 	cfg.fields = *fields
 
+	parsedMode, err := termcolor.ParseMode(*colorMode)
+	if err != nil {
+		return cfg, &usageError{err: err}
+	}
+	cfg.colorMode = parsedMode
+
 	return cfg, nil
 }
 
@@ -252,6 +281,12 @@ func scanCmd(args []string) {
 
 	cfg, err := parseScanArgs(args, envLang)
 	if err != nil {
+		var uerr *usageError
+		if errors.As(err, &uerr) {
+			fmt.Fprintf(os.Stderr, "todox: %s\n\n", uerr.Error())
+			printHelp(cfg.helpLang)
+			os.Exit(2)
+		}
 		log.Fatal(err)
 	}
 
@@ -289,15 +324,28 @@ func scanCmd(args []string) {
 
 	switch strings.ToLower(cfg.output) {
 	case "json":
+		// NOTE: JSON は機械可読フォーマットのため常に非カラー。--color の指定は無視する。
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(res); err != nil {
 			log.Fatal(err)
 		}
 	case "tsv":
+		// NOTE: TSV もターミナル以外で扱われることが多いため常に非カラー。--color の指定は無視する。
 		printTSV(res, fieldSel)
 	default: // table
-		printTable(res, fieldSel)
+		envMap := termcolor.EnvMap(os.Environ())
+		profile := termcolor.DetectProfile(envMap)
+		mode := cfg.colorMode
+		enabled := false
+		switch mode {
+		case termcolor.ModeAlways, termcolor.ModeNever:
+			enabled = termcolor.Enabled(mode, os.Stdout)
+		default:
+			auto := termcolor.DetectMode(os.Stdout, envMap)
+			enabled = termcolor.Enabled(auto, os.Stdout)
+		}
+		printTable(res, fieldSel, tableColorConfig{enabled: enabled, profile: profile})
 	}
 
 	if res.ErrorCount > 0 {
@@ -332,6 +380,7 @@ Search & attribution:
 
 Output:
   -o, --output {table|tsv|json}  Output format (default: table)
+      --color {auto|always|never} Colorize table output (default: auto)
       --fields LIST             Columns for table/TSV (comma-separated; overrides --with-*)
 
 Extra columns (hidden by default):
@@ -363,6 +412,12 @@ Help / language:
       --lang {en|ja}             Language for help (e.g. --lang ja -h)
 Environment:
       GTA_LANG=ja                Default help language (also: GIT_TODO_AUTHORS_LANG)
+      NO_COLOR=1                 Disable colors even in auto mode
+      CLICOLOR=0                 Disable colors when auto-detected
+      CLICOLOR_FORCE!=0          Force colors even when piped (any value other than "0")
+      FORCE_COLOR!=0             Same as CLICOLOR_FORCE
+      TERM=dumb                  Disable colors regardless of auto detection
+      auto mode checks stdout only; stderr TTY is ignored
 
 Examples:
   1) Show last author for all TODO/FIXME:
@@ -412,6 +467,7 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
 
 出力:
   -o, --output {table|tsv|json}  出力形式（既定: table）
+      --color {auto|always|never} 表形式に色付け（既定: auto）
       --fields LIST             table/TSV の列を指定（カンマ区切り。--with-* より優先）
 
 追加カラム（既定は非表示）:
@@ -443,6 +499,12 @@ Blame / 進捗:
       --lang {en|ja}             言語指定（例: --lang ja -h）
 環境変数:
       GTA_LANG=ja                既定のヘルプ言語（GIT_TODO_AUTHORS_LANG でも可）
+      NO_COLOR=1                 auto でも色を無効化
+      CLICOLOR=0                 auto 判定時の色を無効化
+      CLICOLOR_FORCE!=0          パイプ越しでも色を強制（"0" 以外を指定）
+      FORCE_COLOR!=0             CLICOLOR_FORCE と同じ
+      TERM=dumb                  dumb 端末では常に非カラー
+      auto モードは stdout の TTY のみを判定（stderr は対象外）
 
 Examples:
   1) TODO/FIXME の「最後に触った人」を一覧:
@@ -952,40 +1014,55 @@ func printTSV(res *engine.Result, sel FieldSelection) {
 	}
 }
 
-func printTable(res *engine.Result, sel FieldSelection) {
+type tableColorConfig struct {
+	enabled  bool
+	profile  termcolor.Profile
+	ageScale float64 // AGE グラデーションの正規化係数（p95 を基準、下限 120 日、データ無し時は 120）
+}
+
+func printTable(res *engine.Result, sel FieldSelection, colors tableColorConfig) {
 	colCount := len(sel.Fields)
 	widths := make([]int, colCount)
 	for i, f := range sel.Fields {
 		widths[i] = textutil.VisibleWidth(f.Header)
 	}
-	rows := make([][]string, len(res.Items))
+	if sel.ShowAge && colors.enabled {
+		// AGE 列の色分布を決めるために p95 を基準としたスケールを算出する。
+		colors.ageScale = computeAgeScale(res.Items)
+	}
+	rows := make([][]tableCell, len(res.Items))
 	for rowIdx, it := range res.Items {
-		row := make([]string, colCount)
+		row := make([]tableCell, colCount)
 		for colIdx, f := range sel.Fields {
 			val := sanitizeField(formatFieldValue(it, f.Key))
-			row[colIdx] = val
+			style := tableCellStyle(f.Key, it, colors)
+			row[colIdx] = tableCell{text: val, style: style}
 			if w := textutil.VisibleWidth(val); w > widths[colIdx] {
 				widths[colIdx] = w
 			}
 		}
 		rows[rowIdx] = row
 	}
-	headers := make([]string, colCount)
+	headers := make([]tableCell, colCount)
 	for i, f := range sel.Fields {
-		headers[i] = f.Header
+		headers[i] = tableCell{text: f.Header, style: termcolor.HeaderStyle()}
 	}
-	render := func(cells []string) string {
+	render := func(cells []tableCell) string {
 		var b strings.Builder
 		for i, cell := range cells {
 			if i > 0 {
 				b.WriteString("  ")
 			}
 			width := widths[i]
-			truncated := textutil.TruncateByWidth(cell, width, "…")
+			truncated := textutil.TruncateByWidth(cell.text, width, "…")
+			// 表示幅の計算と切り詰めは ANSI コードを除去したテキストに対して行い、
+			// パディング後にスタイルを適用して桁揃えとリセットを保証する。
 			if isRightAligned(sel.Fields[i].Key) {
-				b.WriteString(textutil.PadLeft(truncated, width))
+				aligned := textutil.PadLeft(truncated, width)
+				b.WriteString(termcolor.Apply(cell.style, aligned, colors.enabled))
 			} else {
-				b.WriteString(textutil.PadRight(truncated, width))
+				aligned := textutil.PadRight(truncated, width)
+				b.WriteString(termcolor.Apply(cell.style, aligned, colors.enabled))
 			}
 		}
 		return b.String()
@@ -994,6 +1071,69 @@ func printTable(res *engine.Result, sel FieldSelection) {
 	for _, row := range rows {
 		mustFprintln(os.Stdout, render(row))
 	}
+}
+
+type tableCell struct {
+	text  string
+	style termcolor.Style // このセルに適用する SGR スタイル（ゼロ値なら非カラー）
+}
+
+func tableCellStyle(key string, item engine.Item, colors tableColorConfig) termcolor.Style {
+	if !colors.enabled {
+		return termcolor.Style{}
+	}
+	switch key {
+	case "type":
+		return termcolor.TypeStyle(item.Kind)
+	case "age":
+		return ageCellStyle(item.AgeDays, colors)
+	default:
+		return termcolor.Style{}
+	}
+}
+
+func ageCellStyle(age int, colors tableColorConfig) termcolor.Style {
+	scale := colors.ageScale
+	if scale <= 0 {
+		scale = 120
+	}
+	if colors.profile == termcolor.ProfileTrueColor || colors.profile == termcolor.ProfileANSI256 {
+		return termcolor.AgeStyle(age, colors.profile, scale)
+	}
+	return termcolor.AgeStyle(age, termcolor.ProfileBasic8, scale)
+}
+
+// computeAgeScale は AGE の 95 パーセンタイル（最低 120 日、データが空なら 120）を返し、
+// その値をグラデーションの上限として正規化に利用する。負の AGE は 0 に丸める。
+func computeAgeScale(items []engine.Item) float64 {
+	if len(items) == 0 {
+		return 120
+	}
+	ages := make([]int, 0, len(items))
+	for _, it := range items {
+		age := it.AgeDays
+		if age < 0 {
+			age = 0
+		}
+		ages = append(ages, age)
+	}
+	sort.Ints(ages)
+	idx := int(math.Ceil(0.95*float64(len(ages)))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(ages) {
+		idx = len(ages) - 1
+	}
+	p95 := ages[idx]
+	if p95 < 0 {
+		p95 = 0
+	}
+	scale := math.Max(120, float64(p95))
+	if scale <= 0 {
+		return 120
+	}
+	return scale
 }
 
 func isRightAligned(key string) bool {

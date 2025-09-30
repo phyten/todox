@@ -11,7 +11,8 @@ import (
 // ANSI escape sequences (covers common CSI and OSC forms).
 var ansiRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
-func stripANSI(s string) string {
+// StripANSI removes ANSI escape sequences (CSI/OSC) from s.
+func StripANSI(s string) string {
 	if s == "" {
 		return ""
 	}
@@ -26,7 +27,7 @@ func VisibleWidth(s string) int {
 	if s == "" {
 		return 0
 	}
-	t := stripANSI(s)
+	t := StripANSI(s)
 	g := uniseg.NewGraphemes(t)
 	width := 0
 	for g.Next() {
@@ -47,7 +48,7 @@ func TruncateByWidth(s string, w int, ellipsis string) string {
 	if VisibleWidth(s) <= w {
 		return s
 	}
-	t := stripANSI(s)
+	t := StripANSI(s)
 	g := uniseg.NewGraphemes(t)
 	segs := make([]string, 0, len(t))
 	widths := make([]int, 0, len(t))
