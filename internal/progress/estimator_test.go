@@ -58,3 +58,33 @@ func TestPercentClampsTo100(t *testing.T) {
 		t.Fatalf("5/4 は 100%% として扱うべきです: got=%d", got)
 	}
 }
+
+func TestEstimatorETAOrder(t *testing.T) {
+	est := NewEstimator(100, Config{
+		WarmupSamples:  5,
+		WarmupDuration: time.Millisecond,
+		NotifyInterval: time.Nanosecond,
+	})
+
+	var snap Snapshot
+	for i := 0; i < 20; i++ {
+		time.Sleep(2 * time.Millisecond)
+		snap, _ = est.Advance(1)
+		if snap.Warmup {
+			continue
+		}
+		if snap.ETAP50 > 0 && snap.ETAP90 > 0 && snap.ETAP90 < snap.ETAP50 {
+			t.Fatalf("ETA の順序が逆転しています: p50=%v p90=%v", snap.ETAP50, snap.ETAP90)
+		}
+	}
+
+	if snap.Warmup {
+		t.Fatalf("ウォームアップが終了しませんでした: done=%d elapsed=%v", snap.Done, snap.Elapsed)
+	}
+	if snap.ETAP50 <= 0 {
+		t.Fatalf("P50 ETA が正であるべきです: got=%v", snap.ETAP50)
+	}
+	if snap.ETAP90 < snap.ETAP50 {
+		t.Fatalf("P90 ETA は P50 以上であるべきです: p50=%v p90=%v", snap.ETAP50, snap.ETAP90)
+	}
+}

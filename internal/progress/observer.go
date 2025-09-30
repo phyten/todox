@@ -95,9 +95,6 @@ func NewAutoObserver(w io.Writer) Observer {
 	if f, ok := w.(*os.File); ok && isTTY(f) {
 		return NewTTYObserver(w)
 	}
-	if isTTY(os.Stdout) && isTTY(os.Stderr) {
-		return NewTTYObserver(w)
-	}
 	return NewLineObserver(w)
 }
 

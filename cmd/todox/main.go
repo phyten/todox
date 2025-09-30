@@ -797,8 +797,12 @@ func progressPayload(s progress.Snapshot) map[string]any {
 		"started_at":   s.StartedAt.UTC().Format(time.RFC3339Nano),
 		"updated_at":   s.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	payload["eta_sec_p50"] = durationSeconds(s.ETAP50)
-	payload["eta_sec_p90"] = durationSeconds(s.ETAP90)
+	if v := durationSeconds(s.ETAP50); v != nil {
+		payload["eta_sec_p50"] = v
+	}
+	if v := durationSeconds(s.ETAP90); v != nil {
+		payload["eta_sec_p90"] = v
+	}
 	return payload
 }
 
@@ -809,6 +813,9 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		inputs.Options.Progress = false
+		inputs.Options.ProgressObserver = nil
 
 		res, err := engine.Run(inputs.Options)
 		if err != nil {
@@ -842,6 +849,8 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
+		flusher.Flush()
+		_, _ = fmt.Fprint(w, "retry: 3000\n\n")
 		flusher.Flush()
 
 		obs, snapCh := newStreamObserver(64)
