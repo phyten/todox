@@ -40,7 +40,9 @@ func TestDetectModeEnvironmentOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+	}()
 
 	env := map[string]string{"NO_COLOR": "1"}
 	if got := DetectMode(w, env); got != ModeNever {
@@ -98,7 +100,9 @@ func TestEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+	}()
 
 	if !Enabled(ModeAlways, nil) {
 		t.Fatal("ModeAlways should be enabled even with nil stdout")
