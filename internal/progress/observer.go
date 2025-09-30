@@ -89,6 +89,12 @@ func NewLineObserver(w io.Writer) Observer {
 }
 
 func NewAutoObserver(w io.Writer) Observer {
+	if w == nil {
+		w = os.Stderr
+	}
+	if f, ok := w.(*os.File); ok && isTTY(f) {
+		return NewTTYObserver(w)
+	}
 	if isTTY(os.Stdout) && isTTY(os.Stderr) {
 		return NewTTYObserver(w)
 	}
@@ -99,19 +105,19 @@ func (o *ttyObserver) Publish(s Snapshot) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	line := renderTTY(s)
-	fmt.Fprintf(o.w, "\r\033[K%s", line)
+	_, _ = fmt.Fprintf(o.w, "\r\033[K%s", line)
 }
 
 func (o *ttyObserver) Done(Snapshot) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	fmt.Fprint(o.w, "\r\033[K")
+	_, _ = fmt.Fprint(o.w, "\r\033[K")
 }
 
 func (o *lineObserver) Publish(s Snapshot) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	fmt.Fprintln(o.w, renderLine(s))
+	_, _ = fmt.Fprintln(o.w, renderLine(s))
 }
 
 func (o *lineObserver) Done(Snapshot) {}

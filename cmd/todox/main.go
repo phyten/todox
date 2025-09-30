@@ -23,6 +23,8 @@ import (
 	"github.com/phyten/todox/internal/textutil"
 )
 
+var debugProgressDrops = envBool("TODOX_DEBUG_PROGRESS")
+
 func main() {
 	log.SetFlags(0)
 	envEA := strings.TrimSpace(os.Getenv("TODOX_EASTASIAN"))
@@ -744,6 +746,9 @@ func (o *streamObserver) Publish(s progress.Snapshot) {
 	select {
 	case o.ch <- s:
 	default:
+		if debugProgressDrops {
+			log.Printf("debug: dropping progress snapshot (stage=%s done=%d total=%d)", s.Stage, s.Done, s.Total)
+		}
 	}
 }
 
@@ -846,6 +851,10 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		resCh := make(chan *engine.Result, 1)
 		errCh := make(chan error, 1)
 
+		const pingInterval = 30 * time.Second
+		pingTicker := time.NewTicker(pingInterval)
+		defer pingTicker.Stop()
+
 		go func() {
 			res, runErr := engine.Run(inputs.Options)
 			if runErr != nil {
@@ -861,6 +870,10 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 			select {
 			case <-ctx.Done():
 				return
+			case <-pingTicker.C:
+				if err := writeSSE(w, flusher, "ping", map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+					return
+				}
 			case snap, ok := <-snapCh:
 				if !ok {
 					snapCh = nil
@@ -878,6 +891,7 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 					return
 				}
 				resCh = nil
+				errCh = nil
 			case runErr := <-errCh:
 				_ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
 				return
@@ -980,6 +994,18 @@ func isRightAligned(key string) bool {
 	default:
 		return false
 	}
+}
+
+func envBool(key string) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return false
+	}
+	switch strings.ToLower(val) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func mustFprintln(w io.Writer, text string) {
