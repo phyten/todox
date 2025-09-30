@@ -8,16 +8,19 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/tabwriter"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/phyten/todox/internal/engine"
 	engineopts "github.com/phyten/todox/internal/engine/opts"
+	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/textutil"
-	"github.com/phyten/todox/internal/util"
 )
 
 func main() {
@@ -219,7 +222,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.opts.IgnoreWS = !*noIgnoreWS
 	cfg.opts.Jobs = *jobs
 	cfg.opts.RepoDir = *repo
-	cfg.opts.Progress = util.ShouldShowProgress(*forceProg, *noProgress)
+	cfg.opts.Progress = progress.ShouldShowProgress(*forceProg, *noProgress)
 	cfg.opts.Paths = paths.Slice()
 	cfg.opts.Excludes = excludes.Slice()
 	cfg.opts.PathRegex = pathRegex.Slice()
@@ -678,65 +681,208 @@ function render(data){
 }
 </script></body></html>`
 
+type scanInputs struct {
+	Options  engine.Options
+	FieldSel FieldSelection
+	SortSpec SortSpec
+}
+
+func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
+	options := engineopts.Defaults(repoDir)
+	options, err := engineopts.ApplyWebQueryToOptions(options, q)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	withAge := false
+	if vals := engineopts.SplitMulti(q["with_age"]); len(vals) > 0 {
+		raw := vals[len(vals)-1]
+		v, parseErr := engineopts.ParseBool(raw, "with_age")
+		if parseErr != nil {
+			return scanInputs{}, parseErr
+		}
+		withAge = v
+	}
+
+	fieldsParam := strings.Join(engineopts.SplitMulti(q["fields"]), ",")
+	sortParam := ""
+	if rawSort := q["sort"]; len(rawSort) > 0 {
+		sortParam = strings.TrimSpace(rawSort[len(rawSort)-1])
+	}
+
+	fieldSel, err := ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	sortSpec, err := ParseSortSpec(sortParam)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	options.WithComment = fieldSel.NeedComment
+	options.WithMessage = fieldSel.NeedMessage
+
+	if err := engineopts.NormalizeAndValidate(&options); err != nil {
+		return scanInputs{}, err
+	}
+
+	return scanInputs{Options: options, FieldSel: fieldSel, SortSpec: sortSpec}, nil
+}
+
+type streamObserver struct {
+	ch   chan progress.Snapshot
+	once sync.Once
+}
+
+func newStreamObserver(buffer int) (*streamObserver, <-chan progress.Snapshot) {
+	ch := make(chan progress.Snapshot, buffer)
+	return &streamObserver{ch: ch}, ch
+}
+
+func (o *streamObserver) Publish(s progress.Snapshot) {
+	select {
+	case o.ch <- s:
+	default:
+	}
+}
+
+func (o *streamObserver) Done(s progress.Snapshot) {
+	o.Publish(s)
+	o.once.Do(func() {
+		close(o.ch)
+	})
+}
+
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if event != "" {
+		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
+}
+
+func durationSeconds(d time.Duration) any {
+	if d <= 0 {
+		return nil
+	}
+	return d.Seconds()
+}
+
+func progressPayload(s progress.Snapshot) map[string]any {
+	payload := map[string]any{
+		"stage":        string(s.Stage),
+		"total":        s.Total,
+		"done":         s.Done,
+		"remaining":    s.Remaining,
+		"rate_per_sec": s.RateEMA,
+		"rate_p50":     s.RateP50,
+		"rate_p10":     s.RateP10,
+		"warmup":       s.Warmup,
+		"elapsed_sec":  s.Elapsed.Seconds(),
+		"started_at":   s.StartedAt.UTC().Format(time.RFC3339Nano),
+		"updated_at":   s.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	payload["eta_sec_p50"] = durationSeconds(s.ETAP50)
+	payload["eta_sec_p90"] = durationSeconds(s.ETAP90)
+	return payload
+}
+
 func apiScanHandler(repoDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-
-		options := engineopts.Defaults(repoDir)
-		options, err := engineopts.ApplyWebQueryToOptions(options, q)
+		inputs, err := prepareScanInputs(repoDir, r.URL.Query())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		withAge := false
-		if vals := engineopts.SplitMulti(q["with_age"]); len(vals) > 0 {
-			raw := vals[len(vals)-1]
-			v, parseErr := engineopts.ParseBool(raw, "with_age")
-			if parseErr != nil {
-				http.Error(w, parseErr.Error(), http.StatusBadRequest)
-				return
-			}
-			withAge = v
-		}
-
-		fieldsParam := strings.Join(engineopts.SplitMulti(q["fields"]), ",")
-		sortParam := ""
-		if rawSort := q["sort"]; len(rawSort) > 0 {
-			sortParam = strings.TrimSpace(rawSort[len(rawSort)-1])
-		}
-
-		fieldSel, err := ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		sortSpec, err := ParseSortSpec(sortParam)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		options.WithComment = fieldSel.NeedComment
-		options.WithMessage = fieldSel.NeedMessage
-
-		if err = engineopts.NormalizeAndValidate(&options); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		res, err := engine.Run(options)
+		res, err := engine.Run(inputs.Options)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		ApplySort(res.Items, sortSpec)
-		res.HasComment = fieldSel.ShowComment
-		res.HasMessage = fieldSel.ShowMessage
-		res.HasAge = fieldSel.ShowAge
+		ApplySort(res.Items, inputs.SortSpec)
+		res.HasComment = inputs.FieldSel.ShowComment
+		res.HasMessage = inputs.FieldSel.ShowMessage
+		res.HasAge = inputs.FieldSel.ShowAge
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
+	}
+}
+
+func apiScanStreamHandler(repoDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		inputs, err := prepareScanInputs(repoDir, r.URL.Query())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		flusher.Flush()
+
+		obs, snapCh := newStreamObserver(64)
+		inputs.Options.Progress = false
+		inputs.Options.ProgressObserver = obs
+
+		resCh := make(chan *engine.Result, 1)
+		errCh := make(chan error, 1)
+
+		go func() {
+			res, runErr := engine.Run(inputs.Options)
+			if runErr != nil {
+				errCh <- runErr
+				return
+			}
+			resCh <- res
+		}()
+
+		ctx := r.Context()
+
+		for snapCh != nil || resCh != nil || errCh != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case snap, ok := <-snapCh:
+				if !ok {
+					snapCh = nil
+					continue
+				}
+				if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
+					return
+				}
+			case res := <-resCh:
+				ApplySort(res.Items, inputs.SortSpec)
+				res.HasComment = inputs.FieldSel.ShowComment
+				res.HasMessage = inputs.FieldSel.ShowMessage
+				res.HasAge = inputs.FieldSel.ShowAge
+				if err := writeSSE(w, flusher, "result", res); err != nil {
+					return
+				}
+				resCh = nil
+			case runErr := <-errCh:
+				_ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
+				return
+			}
+		}
 	}
 }
 
@@ -754,6 +900,7 @@ func serveCmd(args []string) {
 	})
 
 	http.HandleFunc("/api/scan", apiScanHandler(*repo))
+	http.HandleFunc("/api/scan/stream", apiScanStreamHandler(*repo))
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))

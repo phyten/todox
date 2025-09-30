@@ -13,8 +13,8 @@ identify **who introduced or last touched** those lines in seconds—either from
 - Extra columns: `--with-comment`, `--with-message`, `--with-age`, `--full` (shortcut for comment+message with truncation).
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
 - Output formats: `table`, `tsv`, `json`.
-- Progress bar: one-line TTY updates (disable with `--no-progress`).
-- Web mode: `todox serve` exposes a minimal UI plus a JSON API.
+- Progress bar: one-line TTY updates with smoothed ETA/P90 bands (disable with `--no-progress`).
+- Web mode: `todox serve` exposes a minimal UI plus a JSON API and streaming progress via `/api/scan/stream`.
 
 > For automation rules and AI collaboration guidelines, see [`AGENTS.md`](./AGENTS.md).
 >

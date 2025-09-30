@@ -1,20 +1,14 @@
-package util
+package progress
 
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestPercentは100を上限とする(t *testing.T) {
-	if got := percent(5, 4); got != 100 {
-		t.Fatalf("5/4 は 100%% として扱うべきです: got=%d", got)
-	}
-}
-
-func TestProgressAdvanceは並列でも連番になる(t *testing.T) {
+func TestEstimatorAdvanceIsSequential(t *testing.T) {
 	const workers = 128
-
-	prog := NewProgress(workers, false)
+	est := NewEstimator(workers, Config{NotifyInterval: time.Nanosecond})
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -26,7 +20,8 @@ func TestProgressAdvanceは並列でも連番になる(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			results <- prog.Advance()
+			snap, _ := est.Advance(1)
+			results <- snap.Done
 		}()
 	}
 
@@ -55,5 +50,11 @@ func TestProgressAdvanceは並列でも連番になる(t *testing.T) {
 		if !ok {
 			t.Fatalf("進捗値が欠落しています: index=%d", i+1)
 		}
+	}
+}
+
+func TestPercentClampsTo100(t *testing.T) {
+	if got := percent(5, 4); got != 100 {
+		t.Fatalf("5/4 は 100%% として扱うべきです: got=%d", got)
 	}
 }

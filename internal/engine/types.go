@@ -3,6 +3,8 @@ package engine
 import (
 	"regexp"
 	"time"
+
+	"github.com/phyten/todox/internal/progress"
 )
 
 // Item は 1 件の TODO/FIXME を表す
@@ -47,6 +49,7 @@ type Options struct {
 	PathRegex         []string
 	PathRegexCompiled []*regexp.Regexp
 	ExcludeTypical    bool
+	ProgressObserver  progress.Observer `json:"-"`
 }
 
 // Result は出力
