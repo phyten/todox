@@ -334,7 +334,7 @@ func scanCmd(args []string) {
 		// NOTE: TSV もターミナル以外で扱われることが多いため常に非カラー。--color の指定は無視する。
 		printTSV(res, fieldSel)
 	default: // table
-		envMap := termcolor.EnvMap(os.Environ())
+		envMap := toEnvMap(os.Environ())
 		profile := termcolor.DetectProfile(envMap)
 		mode := cfg.colorMode
 		enabled := false
@@ -1017,11 +1017,16 @@ func printTSV(res *engine.Result, sel FieldSelection) {
 type tableColorConfig struct {
 	enabled  bool
 	profile  termcolor.Profile
+	scheme   termcolor.Scheme
 	ageScale float64 // AGE グラデーションの正規化係数（p95 を基準、下限 120 日、データ無し時は 120）
 }
 
 func printTable(res *engine.Result, sel FieldSelection, colors tableColorConfig) {
 	colCount := len(sel.Fields)
+	if colors.enabled && colors.scheme == termcolor.SchemeUnknown {
+		env := toEnvMap(os.Environ())
+		colors.scheme = termcolor.DetectScheme(env)
+	}
 	widths := make([]int, colCount)
 	for i, f := range sel.Fields {
 		widths[i] = textutil.VisibleWidth(f.Header)
@@ -1073,6 +1078,24 @@ func printTable(res *engine.Result, sel FieldSelection, colors tableColorConfig)
 	}
 }
 
+// toEnvMap converts a "KEY=VALUE" environment list into a map.
+// DetectScheme relies on this form, and keeping it local avoids
+// depending on helper functions that may not exist in older trees.
+func toEnvMap(values []string) map[string]string {
+	m := make(map[string]string, len(values))
+	for _, entry := range values {
+		if entry == "" {
+			continue
+		}
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			m[entry[:i]] = entry[i+1:]
+			continue
+		}
+		m[entry] = ""
+	}
+	return m
+}
+
 type tableCell struct {
 	text  string
 	style termcolor.Style // このセルに適用する SGR スタイル（ゼロ値なら非カラー）
@@ -1084,7 +1107,7 @@ func tableCellStyle(key string, item engine.Item, colors tableColorConfig) termc
 	}
 	switch key {
 	case "type":
-		return termcolor.TypeStyle(item.Kind)
+		return termcolor.TypeStyle(item.Kind, colors.scheme, colors.profile)
 	case "age":
 		return ageCellStyle(item.AgeDays, colors)
 	default:
