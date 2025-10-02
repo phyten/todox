@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/phyten/todox/internal/web"
 )
 
 func hasHeadlessChrome() bool {
@@ -32,12 +32,9 @@ func TestRenderはDOMに危険なノードを挿入しない(t *testing.T) {
 		t.Skip("ヘッドレスChromeが見つからないためスキップします")
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := io.WriteString(w, webAppHTML); err != nil {
-			t.Fatalf("HTMLの書き込みに失敗しました: %v", err)
-		}
-	}))
+	mux := http.NewServeMux()
+	web.Register(mux)
+	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	allocOpts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
@@ -77,7 +74,7 @@ const fixture={
   message:'bad <msg> & stuff'
  }]
 };
-document.getElementById('out').innerHTML=render(fixture);
+document.getElementById('out').innerHTML=renderResult(fixture);
 return true;
 })();`
 
