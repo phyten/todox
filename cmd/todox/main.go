@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,6 +22,9 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/phyten/todox/internal/engine"
 	engineopts "github.com/phyten/todox/internal/engine/opts"
+	"github.com/phyten/todox/internal/execx"
+	"github.com/phyten/todox/internal/gitremote"
+	"github.com/phyten/todox/internal/link"
 	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
@@ -38,9 +42,15 @@ func main() {
 		runewidth.EastAsianWidth = false
 	}
 	runewidth.DefaultCondition = runewidth.NewCondition()
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		serveCmd(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			serveCmd(os.Args[2:])
+			return
+		case "pr":
+			prCmd(os.Args[2:])
+			return
+		}
 	}
 	scanCmd(os.Args[1:])
 }
@@ -51,6 +61,7 @@ type scanConfig struct {
 	withComment bool
 	withMessage bool
 	withAge     bool
+	withLink    bool
 	sortKey     string
 	fields      string
 	showHelp    bool
@@ -127,6 +138,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
 	withAge := fs.Bool("with-age", false, "show AGE column (table/tsv)")
+	withLink := fs.Bool("with-link", false, "show URL column (GitHub blob link)")
 	fields := fs.String("fields", "", "comma-separated columns for table/tsv (overrides --with-*)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
@@ -262,6 +274,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg.withComment = *withComment
 	cfg.withMessage = *withMessage
 	cfg.withAge = *withAge
+	cfg.withLink = *withLink
 	cfg.sortKey = *sortKey
 	cfg.fields = *fields
 
@@ -296,7 +309,7 @@ func scanCmd(args []string) {
 		return
 	}
 
-	fieldSel, err := ResolveFields(cfg.fields, cfg.withComment, cfg.withMessage, cfg.withAge)
+	fieldSel, err := ResolveFields(cfg.fields, cfg.withComment, cfg.withMessage, cfg.withAge, cfg.withLink)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -313,6 +326,8 @@ func scanCmd(args []string) {
 		log.Fatal(err)
 	}
 
+	runner := execx.DefaultRunner()
+
 	res, err := engine.Run(cfg.opts)
 	if err != nil {
 		log.Fatal(err)
@@ -322,6 +337,7 @@ func scanCmd(args []string) {
 	res.HasComment = fieldSel.ShowComment
 	res.HasMessage = fieldSel.ShowMessage
 	res.HasAge = fieldSel.ShowAge
+	_ = applyLinkColumn(context.Background(), runner, cfg.opts.RepoDir, res, fieldSel)
 
 	switch strings.ToLower(cfg.output) {
 	case "json":
@@ -390,6 +406,7 @@ Extra columns (hidden by default):
       --with-message             Show MESSAGE (commit subject = 1st line)
       --with-snippet             Alias of --with-comment (backward compatible)
       --with-age                 Show AGE (days since author date) in table/TSV
+      --with-link                Show URL column with GitHub blob links
 
 Truncation (applies to COMMENT / MESSAGE only):
       --truncate N               Truncate both to N chars (0 = unlimited)
@@ -440,6 +457,11 @@ Examples:
   6) Different truncate per field (comment 60, message unlimited):
        todox --full --truncate-comment 60 --truncate-message 0
 
+GitHub helpers:
+  todox pr find --commit <sha>    List pull requests containing the commit
+  todox pr open --commit <sha>    Open the first matching pull request in a browser
+  todox pr create --commit <sha>  Create a pull request via gh CLI (see todox pr create --help)
+
   7) Machine-friendly TSV:
        todox --full -o tsv > todo_full.tsv
 
@@ -477,6 +499,7 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --with-message             MESSAGE（コミットメッセージの1行目）
       --with-snippet             --with-comment の別名（後方互換）
       --with-age                 AGE（日数）列を table/TSV に追加
+      --with-link                URL 列を追加（GitHub の該当行リンク）
 
 トランケート（COMMENT/MESSAGE のみ対象）:
       --truncate N               両方を N 文字で切り詰め（0=無制限）
@@ -527,6 +550,11 @@ Examples:
   6) 片方だけトランケート指定（コメント60 / メッセージは無制限）:
        todox --full --truncate-comment 60 --truncate-message 0
 
+GitHub 連携コマンド:
+  todox pr find --commit <sha>    指定コミットを含む PR を一覧表示
+  todox pr open --commit <sha>    最初に見つかった PR をブラウザで開く
+  todox pr create --commit <sha>  gh CLI 経由で PR を作成（詳細は --help）
+
   7) 機械処理向け TSV 出力:
        todox --full -o tsv > todo_full.tsv
 
@@ -537,6 +565,227 @@ Examples:
   9) 空白変更も blame 対象にする:
        todox --no-ignore-ws
 `
+
+const webAppHTML = `<!doctype html>
+<html><head><meta charset="utf-8"/><title>todox</title>
+<style>
+body{font:14px/1.45 system-ui, sans-serif; margin:20px;}
+table{border-collapse:collapse;width:100%;}
+th,td{border:1px solid #ddd;padding:6px 8px;vertical-align:top;}
+thead{background:#fafafa;position:sticky;top:0;}
+code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+label{margin-right:12px}
+input[type=text]{width:240px}
+.small{color:#666}
+.errors{background:#fff4f4;border:1px solid #f2c6c6;padding:8px;margin:12px 0;}
+.error-banner{display:none;align-items:center;justify-content:space-between;background:#ffecec;border:1px solid #f5a9a9;color:#8a1f1f;padding:8px 12px;margin:12px 0;}
+.error-banner button{background:transparent;border:0;font-size:18px;line-height:1;cursor:pointer;color:inherit;padding:0;margin-left:12px;}
+.link-icon{display:inline-flex;align-items:center;gap:4px;text-decoration:none;font-size:16px;}
+</style></head><body>
+<h2>todox</h2>
+<div id="error-banner" class="error-banner" role="alert">
+ <span id="error-message"></span>
+ <button type="button" id="error-close" aria-label="Close">&times;</button>
+</div>
+<form id="f">
+<label>type:
+<select name="type">
+	<option>both</option>
+	<option>todo</option>
+	<option>fixme</option>
+</select></label>
+<label>mode:
+<select name="mode">
+	<option>last</option>
+	<option>first</option>
+</select></label>
+<label>author (regexp): <input name="author" type="text"></label>
+<label>path (CSV ok): <input name="path" type="text" placeholder="src,pkg"></label>
+<label>exclude (CSV ok): <input name="exclude" type="text" placeholder="vendor/**"></label>
+<label>path regex: <input name="path_regex" type="text" placeholder="\\.go$"></label>
+<label><input type="checkbox" name="with_comment"> comment</label>
+<label><input type="checkbox" name="with_message"> message</label>
+<label><input type="checkbox" name="with_link"> link</label>
+<label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
+<label><input type="checkbox" name="exclude_typical"> exclude typical dirs</label>
+<label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
+<label>truncate: <input type="text" name="truncate" value="120"></label>
+<button>Scan</button>
+</form>
+<p class="small">Tip: Same params as CLI. Example: <code>/api/scan?type=todo&mode=first&with_comment=1</code></p>
+<div id="out"></div>
+<script>
+const f=document.getElementById('f'), out=document.getElementById('out');
+const banner=document.getElementById('error-banner');
+const bannerMsg=document.getElementById('error-message');
+const bannerClose=document.getElementById('error-close');
+function showError(msg){
+ bannerMsg.textContent=msg;
+ banner.style.display='flex';
+}
+function hideError(){
+ banner.style.display='none';
+ bannerMsg.textContent='';
+}
+bannerClose.addEventListener('click',(e)=>{
+ e.preventDefault();
+ hideError();
+});
+f.onsubmit=async (e)=>{
+ e.preventDefault();
+ hideError();
+ try{
+  const fd=new FormData(f);
+  const q=new URLSearchParams(fd);
+
+  // ensure ignore_ws follows server default semantics (true by default)
+  {
+    const el=f.elements.namedItem('ignore_ws');
+    if(el instanceof HTMLInputElement){
+      if(el.checked){
+        q.delete('ignore_ws');
+      }else{
+        q.set('ignore_ws','0');
+      }
+    }
+  }
+
+  // trim CSV inputs and drop empties for path filters
+  for(const key of ['path','exclude','path_regex']){
+    const values=q.getAll(key);
+    q.delete(key);
+    const cleaned=[];
+    for(const value of values){
+      if(value==null){continue;}
+      for(const piece of String(value).split(',')){
+        const trimmed=piece.trim();
+        if(trimmed){cleaned.push(trimmed);}
+      }
+    }
+    for(const entry of cleaned){
+      q.append(key, entry);
+    }
+  }
+
+  // checkbox only when enabled
+  {
+    const el=f.elements.namedItem('exclude_typical');
+    if(el instanceof HTMLInputElement){
+      if(el.checked){
+        q.set('exclude_typical','1');
+      }else{
+        q.delete('exclude_typical');
+      }
+    }
+  }
+
+  // only send jobs when explicitly provided
+  {
+    const el=f.elements.namedItem('jobs');
+    if(el instanceof HTMLInputElement){
+      if((el.value||'').trim()===''){
+        q.delete('jobs');
+      }
+    }
+  }
+  const res=await fetch('/api/scan?'+q.toString());
+  if(!res.ok){
+   let msg='HTTP '+res.status;
+   if(res.statusText){msg+=' '+res.statusText;}
+   try{
+    const text=(await res.text()).trim();
+    if(text){msg+=': '+text;}
+   }catch(_){}
+   throw new Error(msg);
+  }
+  const data=await res.json();
+  out.innerHTML=render(data);
+ }catch(err){
+  const msg=err&&err.message?err.message:'予期しないエラーが発生しました';
+  showError(msg);
+ }
+}
+function escText(s){
+ const value=s==null?'':String(s);
+ return value.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+function escAttr(s){
+ const value=s==null?'':String(s);
+ return value.replace(/[&<>"']/g, c=>({
+  '&':'&amp;',
+  '<':'&lt;',
+  '>':'&gt;',
+  '"':'&quot;',
+  "'":'&#39;'
+ }[c]));
+}
+function render(data){
+ const rows=data.items||[];
+ const errs=data.errors||[];
+ let parts=[];
+ if(errs.length){
+        let list='<ul>';
+        for(const e of errs){
+                const fileRaw=e.file||'(unknown)';
+                const lineRaw=e.line>0?String(e.line):'—';
+                const loc=fileRaw+':'+lineRaw;
+                list+='<li><code>'+escText(loc)+'</code> ['+escText(e.stage||'git')+'] '+escText(e.message||'')+'</li>';
+        }
+        list+='</ul>';
+        parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
+ }
+ if(!rows||rows.length===0){
+        parts.push('<p>No results.</p>');
+        return parts.join('');
+ }
+ const hasAge=!!data.has_age;
+ const hasComment=!!data.has_comment;
+ const hasMessage=!!data.has_message;
+ const hasURL=!!data.has_url;
+ const headerCells=['TYPE','AUTHOR','EMAIL','DATE'];
+ if(hasAge){headerCells.push('AGE');}
+ headerCells.push('COMMIT','LOCATION');
+ if(hasURL){headerCells.push('URL');}
+ if(hasComment){headerCells.push('COMMENT');}
+ if(hasMessage){headerCells.push('MESSAGE');}
+ let h='<table><thead><tr>'+headerCells.map(hd=>'<th>'+hd+'</th>').join('')+'</tr></thead><tbody>';
+ for(const r of rows){
+       const cells=[];
+       cells.push('<td>'+escText(r.kind||'')+'</td>');
+       cells.push('<td>'+escText(r.author||'')+'</td>');
+       cells.push('<td>'+escText(r.email||'')+'</td>');
+       cells.push('<td>'+escText(r.date||'')+'</td>');
+       if(hasAge){
+               const ageRaw=r.age_days==null?'':String(r.age_days);
+               cells.push('<td>'+escText(ageRaw)+'</td>');
+       }
+       cells.push('<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>');
+  const fileRaw=r.file==null?'':String(r.file);
+  const lineRaw=r.line==null||r.line===0?'':String(r.line);
+  const loc=fileRaw+':'+lineRaw;
+  cells.push('<td><code>'+escText(loc)+'</code></td>');
+  if(hasURL){
+      const urlRaw=r.url==null?'':String(r.url);
+      if(urlRaw){
+          const safe=escAttr(urlRaw);
+          cells.push('<td><a class="link-icon" href="'+safe+'" target="_blank" rel="noopener noreferrer" aria-label="GitHub で開く"><span aria-hidden="true">🔗</span></a></td>');
+      }else{
+          cells.push('<td></td>');
+      }
+  }
+  if(hasComment){
+          cells.push('<td>'+escText(r.comment||'')+'</td>');
+  }
+       if(hasMessage){
+               cells.push('<td>'+escText(r.message||'')+'</td>');
+       }
+       h+='<tr>'+cells.join('')+'</tr>';
+ }
+ h+='</tbody></table>';
+ parts.push(h);
+ return parts.join('');
+}
+</script></body></html>`
 
 type scanInputs struct {
 	Options  engine.Options
@@ -561,13 +810,23 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		withAge = v
 	}
 
+	withLink := false
+	if vals := engineopts.SplitMulti(q["with_link"]); len(vals) > 0 {
+		raw := vals[len(vals)-1]
+		v, parseErr := engineopts.ParseBool(raw, "with_link")
+		if parseErr != nil {
+			return scanInputs{}, parseErr
+		}
+		withLink = v
+	}
+
 	fieldsParam := strings.Join(engineopts.SplitMulti(q["fields"]), ",")
 	sortParam := ""
 	if rawSort := q["sort"]; len(rawSort) > 0 {
 		sortParam = strings.TrimSpace(rawSort[len(rawSort)-1])
 	}
 
-	fieldSel, err := ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge)
+	fieldSel, err := ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge, withLink)
 	if err != nil {
 		return scanInputs{}, err
 	}
@@ -672,6 +931,8 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 		inputs.Options.Progress = false
 		inputs.Options.ProgressObserver = nil
 
+		runner := execx.DefaultRunner()
+
 		res, err := engine.Run(inputs.Options)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -681,7 +942,8 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 		res.HasComment = inputs.FieldSel.ShowComment
 		res.HasMessage = inputs.FieldSel.ShowMessage
 		res.HasAge = inputs.FieldSel.ShowAge
-		w.Header().Set("Content-Type", "application/json")
+		_ = applyLinkColumn(r.Context(), runner, inputs.Options.RepoDir, res, inputs.FieldSel)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(res)
 	}
 }
@@ -711,6 +973,8 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		obs, snapCh := newStreamObserver(64)
 		inputs.Options.Progress = false
 		inputs.Options.ProgressObserver = obs
+
+		runner := execx.DefaultRunner()
 
 		resCh := make(chan *engine.Result, 1)
 		errCh := make(chan error, 1)
@@ -751,6 +1015,7 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 				res.HasComment = inputs.FieldSel.ShowComment
 				res.HasMessage = inputs.FieldSel.ShowMessage
 				res.HasAge = inputs.FieldSel.ShowAge
+				_ = applyLinkColumn(ctx, runner, inputs.Options.RepoDir, res, inputs.FieldSel)
 				if err := writeSSE(w, flusher, "result", res); err != nil {
 					return
 				}
@@ -778,6 +1043,43 @@ func serveCmd(args []string) {
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("todox serve listening on %s (repo=%s)", addr, mustAbs(*repo))
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+func applyLinkColumn(ctx context.Context, runner execx.Runner, repoDir string, res *engine.Result, sel FieldSelection) error {
+	if res == nil {
+		return nil
+	}
+	res.HasURL = sel.ShowURL
+	if !sel.NeedURL {
+		return nil
+	}
+	info, err := gitremote.Detect(ctx, runner, repoDir)
+	if err != nil {
+		for idx := range res.Items {
+			res.Items[idx].URL = ""
+		}
+		msg := "failed to determine git remote: " + err.Error()
+		already := false
+		for _, e := range res.Errors {
+			if e.Stage == "link" && e.Message == msg {
+				already = true
+				break
+			}
+		}
+		if !already {
+			res.Errors = append(res.Errors, engine.ItemError{
+				Stage:   "link",
+				Message: msg,
+			})
+		}
+		res.ErrorCount = len(res.Errors)
+		return nil
+	}
+	for idx := range res.Items {
+		it := &res.Items[idx]
+		it.URL = link.Blob(info, it.Commit, it.File, it.Line)
+	}
+	return nil
 }
 
 func printTSV(res *engine.Result, sel FieldSelection) {

@@ -19,6 +19,7 @@ type Item struct {
 	Line    int    `json:"line"`
 	Comment string `json:"comment,omitempty"` // TODO/FIXME からの行
 	Message string `json:"message,omitempty"` // commit subject (1行目)
+	URL     string `json:"url,omitempty"`     // コミット行への恒久リンク
 }
 
 // ItemError は 1 行の取得に失敗した際の情報を表す
@@ -58,6 +59,7 @@ type Result struct {
 	HasComment bool        `json:"has_comment"`
 	HasMessage bool        `json:"has_message"`
 	HasAge     bool        `json:"has_age"`
+	HasURL     bool        `json:"has_url"`
 	Total      int         `json:"total"`
 	ElapsedMS  int64       `json:"elapsed_ms"`
 	Errors     []ItemError `json:"errors,omitempty"`

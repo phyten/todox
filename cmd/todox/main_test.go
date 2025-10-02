@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dop251/goja"
 
 	"github.com/phyten/todox/internal/engine"
 	"github.com/phyten/todox/internal/termcolor"
@@ -32,7 +36,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	sel, err := ResolveFields("", true, true, false)
+	sel, err := ResolveFields("", true, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -66,7 +70,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	sel, err := ResolveFields("", true, false, false)
+	sel, err := ResolveFields("", true, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -115,7 +119,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", true, false, false)
+	sel, err := ResolveFields("", true, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -158,7 +162,7 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true)
+	sel, err := ResolveFields("", false, false, true, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -199,7 +203,7 @@ func TestPrintTSVは常に非カラー(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false)
+	sel, err := ResolveFields("type,author", false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -239,7 +243,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true)
+	sel, err := ResolveFields("", false, false, true, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -282,7 +286,7 @@ func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
 		},
 	}
 
-	sel, err := ResolveFields("type,author,location", false, false, false)
+	sel, err := ResolveFields("type,author,location", false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -353,7 +357,7 @@ func TestPrintTableはカラーを有効化するとANSIコードを含む(t *te
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, false)
+	sel, err := ResolveFields("", false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -392,7 +396,7 @@ func TestTableColorNeverDisablesANSI(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false)
+	sel, err := ResolveFields("type,author", false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -420,6 +424,67 @@ func TestTableColorEnvNoColorBeatsForce(t *testing.T) {
 	}
 }
 
+type stubRunner struct{}
+
+func (stubRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error) {
+	if name == "git" && len(args) >= 3 && args[0] == "config" && args[1] == "--get" {
+		key := args[2]
+		if key == "remote.origin.url" {
+			return []byte("https://github.com/example/demo.git\n"), nil, nil
+		}
+		if key == "remote.upstream.url" {
+			return []byte("ssh://git@github.example.com:2222/team/demo.git\n"), nil, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("unexpected command: %s %v", name, args)
+}
+
+type errorRunner struct{}
+
+func (errorRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error) {
+	return nil, []byte("fatal: not a git repository"), fmt.Errorf("exit status 128")
+}
+
+func TestApplyLinkColumnAddsURL(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "docs/readme.md", Line: 7}}}
+	sel := FieldSelection{NeedURL: true, ShowURL: true}
+	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", res, sel); err != nil {
+		t.Fatalf("applyLinkColumn failed: %v", err)
+	}
+	if !res.HasURL {
+		t.Fatalf("HasURL not set: %+v", res)
+	}
+	if len(res.Items) == 0 || res.Items[0].URL == "" {
+		t.Fatalf("URL not populated: %+v", res.Items)
+	}
+	if !strings.Contains(res.Items[0].URL, "?plain=1#L7") {
+		t.Fatalf("markdown URL should include plain mode: %s", res.Items[0].URL)
+	}
+}
+
+func TestApplyLinkColumnGracefullyHandlesErrors(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "deadbeef", File: "foo.go", Line: 12}}}
+	sel := FieldSelection{NeedURL: true, ShowURL: true}
+	if err := applyLinkColumn(context.Background(), errorRunner{}, ".", res, sel); err != nil {
+		t.Fatalf("applyLinkColumn should not fail: %v", err)
+	}
+	if !res.HasURL {
+		t.Fatalf("HasURL should still be true: %+v", res)
+	}
+	if res.Items[0].URL != "" {
+		t.Fatalf("URL should be blank on failure: %+v", res.Items)
+	}
+	if len(res.Errors) == 0 {
+		t.Fatalf("expected link error to be recorded: %+v", res)
+	}
+	if res.Errors[0].Stage != "link" {
+		t.Fatalf("unexpected error stage: %+v", res.Errors[0])
+	}
+	if res.ErrorCount != len(res.Errors) {
+		t.Fatalf("error count not updated: %+v", res)
+	}
+}
+
 func TestApplySortは年齢順に並び替える(t *testing.T) {
 	items := []engine.Item{
 		{AgeDays: 1, File: "b.go", Line: 30},
@@ -440,6 +505,36 @@ func TestApplySortは年齢順に並び替える(t *testing.T) {
 	}
 	if items[len(items)-1].AgeDays != 1 {
 		t.Fatalf("最も若い項目が末尾に来ていません: %+v", items)
+	}
+}
+
+func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
+	rt := goja.New()
+	for _, fn := range []string{"escText", "escAttr", "render"} {
+		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
+			t.Fatalf("failed to load %s: %v", fn, err)
+		}
+	}
+	noURLScript := `render({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false});`
+	yesURLScript := `render({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef",url:"https://example.com/blob"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:true});`
+	noVal, err := rt.RunString(noURLScript)
+	if err != nil {
+		t.Fatalf("render without URL failed: %v", err)
+	}
+	yesVal, err := rt.RunString(yesURLScript)
+	if err != nil {
+		t.Fatalf("render with URL failed: %v", err)
+	}
+	noHTML := noVal.String()
+	yesHTML := yesVal.String()
+	if strings.Contains(noHTML, "<th>URL</th>") || strings.Contains(noHTML, "link-icon") {
+		t.Fatalf("URL 列は has_url=false では表示されない想定です: %s", noHTML)
+	}
+	if !strings.Contains(yesHTML, "<th>URL</th>") {
+		t.Fatalf("has_url=true で URL ヘッダーが欠けています: %s", yesHTML)
+	}
+	if !strings.Contains(yesHTML, "aria-label=\"GitHub で開く\"") {
+		t.Fatalf("アクセシブルラベルが不足しています: %s", yesHTML)
 	}
 }
 
@@ -478,6 +573,23 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 	if !strings.Contains(text, "(unknown location) [git] mystery") {
 		t.Fatalf("不明位置の行が期待通りではありません: %q", text)
 	}
+}
+
+func extractJSFunction(t *testing.T, name string) string {
+	marker := "function " + name + "("
+	idx := strings.Index(webAppHTML, marker)
+	if idx < 0 {
+		t.Fatalf("function %s not found", name)
+	}
+	rest := webAppHTML[idx:]
+	end := strings.Index(rest, "\nfunction ")
+	if end == -1 {
+		end = strings.Index(rest, "\n</script>")
+	}
+	if end == -1 {
+		t.Fatalf("could not determine end of function %s", name)
+	}
+	return rest[:end]
 }
 
 func TestAPIScanHandlerは不正なtruncateで400を返す(t *testing.T) {

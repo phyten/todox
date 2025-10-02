@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestResolveFieldsDefaultUsesFlags(t *testing.T) {
-	sel, err := ResolveFields("", true, false, true)
+	sel, err := ResolveFields("", true, false, true, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestResolveFieldsDefaultUsesFlags(t *testing.T) {
 }
 
 func TestResolveFieldsOverridesFlags(t *testing.T) {
-	sel, err := ResolveFields("type,author", true, true, false)
+	sel, err := ResolveFields("type,author", true, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestResolveFieldsOverridesFlags(t *testing.T) {
 }
 
 func TestResolveFieldsEnablesMessageViaFields(t *testing.T) {
-	sel, err := ResolveFields("type,message", false, false, false)
+	sel, err := ResolveFields("type,message", false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -51,7 +51,43 @@ func TestResolveFieldsEnablesMessageViaFields(t *testing.T) {
 }
 
 func TestResolveFieldsUnknownField(t *testing.T) {
-	if _, err := ResolveFields("unknown", false, false, false); err == nil {
+	if _, err := ResolveFields("unknown", false, false, false, false); err == nil {
 		t.Fatal("expected error for unknown field")
+	}
+}
+
+func TestResolveFieldsIncludesURLColumn(t *testing.T) {
+	sel, err := ResolveFields("", false, false, false, true)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+	found := false
+	for _, f := range sel.Fields {
+		if f.Key == "url" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("URL column not included: %+v", sel.Fields)
+	}
+	if !sel.ShowURL || !sel.NeedURL {
+		t.Fatalf("URL flags not set: %+v", sel)
+	}
+}
+
+func TestResolveFieldsURLColumnRequestedViaFieldsOnly(t *testing.T) {
+	sel, err := ResolveFields("url", false, false, false, false)
+	if err != nil {
+		t.Fatalf("ResolveFields failed: %v", err)
+	}
+	if len(sel.Fields) != 1 || sel.Fields[0].Key != "url" {
+		t.Fatalf("unexpected fields: %+v", sel.Fields)
+	}
+	if !sel.ShowURL {
+		t.Fatalf("URL column should be shown when requested explicitly: %+v", sel)
+	}
+	if !sel.NeedURL {
+		t.Fatalf("NeedURL should be true when field selection includes url: %+v", sel)
 	}
 }
