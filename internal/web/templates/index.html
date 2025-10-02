@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>todox</title>
+  <link rel="stylesheet" href="{{.StylesPath}}">
+</head>
+<body>
+  <h2>todox</h2>
+  <div id="error-banner" class="error-banner" role="alert" aria-live="assertive">
+    <span id="error-message"></span>
+    <button type="button" id="error-close" aria-label="Close">&times;</button>
+  </div>
+  <form id="f">
+    <label>type:
+      <select name="type">
+        <option>both</option>
+        <option>todo</option>
+        <option>fixme</option>
+      </select>
+    </label>
+    <label>mode:
+      <select name="mode">
+        <option>last</option>
+        <option>first</option>
+      </select>
+    </label>
+    <label>author (regexp): <input name="author" type="text"></label>
+    <label>path (CSV ok): <input name="path" type="text" placeholder="src,pkg"></label>
+    <label>exclude (CSV ok): <input name="exclude" type="text" placeholder="vendor/**"></label>
+    <label>path regex: <input name="path_regex" type="text" placeholder="\\.go$"></label>
+    <label><input type="checkbox" name="with_comment"> comment</label>
+    <label><input type="checkbox" name="with_message"> message</label>
+    <label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
+    <label><input type="checkbox" name="exclude_typical"> exclude typical dirs</label>
+    <label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
+    <label>truncate: <input type="text" name="truncate" value="120"></label>
+    <button type="submit">Scan</button>
+  </form>
+  <p class="small">Tip: Same params as CLI. Example: <code>/api/scan?type=todo&amp;mode=first&amp;with_comment=1</code></p>
+  <div id="out"></div>
+  <script>
+  const f=document.getElementById('f'),out=document.getElementById('out');
+  const banner=document.getElementById('error-banner');
+  const bannerMsg=document.getElementById('error-message');
+  const bannerClose=document.getElementById('error-close');
+  function showError(msg){
+    bannerMsg.textContent=msg;
+    banner.style.display='flex';
+  }
+  function hideError(){
+    banner.style.display='none';
+    bannerMsg.textContent='';
+  }
+  bannerClose.addEventListener('click',(e)=>{
+    e.preventDefault();
+    hideError();
+  });
+  f.onsubmit=async(e)=>{
+    e.preventDefault();
+    hideError();
+    try{
+      const fd=new FormData(f);
+      const q=new URLSearchParams(fd);
+      {
+        const el=f.elements.namedItem('ignore_ws');
+        if(el instanceof HTMLInputElement){
+          if(el.checked){
+            q.delete('ignore_ws');
+          }else{
+            q.set('ignore_ws','0');
+          }
+        }
+      }
+      for(const key of ['path','exclude','path_regex']){
+        const values=q.getAll(key);
+        q.delete(key);
+        const cleaned=[];
+        for(const value of values){
+          if(value==null){continue;}
+          for(const piece of String(value).split(',')){
+            const trimmed=piece.trim();
+            if(trimmed){cleaned.push(trimmed);}
+          }
+        }
+        for(const entry of cleaned){
+          q.append(key,entry);
+        }
+      }
+      {
+        const el=f.elements.namedItem('exclude_typical');
+        if(el instanceof HTMLInputElement){
+          if(el.checked){
+            q.set('exclude_typical','1');
+          }else{
+            q.delete('exclude_typical');
+          }
+        }
+      }
+      {
+        const el=f.elements.namedItem('jobs');
+        if(el instanceof HTMLInputElement){
+          if((el.value||'').trim()===''){
+            q.delete('jobs');
+          }
+        }
+      }
+      const res=await fetch('/api/scan?'+q.toString());
+      const raw=await res.text();
+      if(!res.ok){
+        let msg='HTTP '+res.status;
+        if(res.statusText){
+          msg+=' '+res.statusText;
+        }
+        const trimmed=raw.trim();
+        if(trimmed){
+          msg+=': '+trimmed;
+        }
+        throw new Error(msg);
+      }
+      let data=null;
+      if(raw.trim()!==''){
+        try{
+          data=JSON.parse(raw);
+        }catch(parseErr){
+          const detail=parseErr instanceof Error?parseErr.message:String(parseErr);
+          throw new Error('Failed to parse response JSON: '+detail);
+        }
+      }
+      out.innerHTML=renderResult(data);
+    }catch(err){
+      console.error(err);
+      showError(err instanceof Error?err.message:String(err));
+    }
+  };
+  function escText(value){
+    return String(value||'')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
+  function renderBadge(kind){
+    const raw=String(kind||'');
+    if(!raw){
+      return '';
+    }
+    const upper=raw.toUpperCase();
+    let dataType='OTHER';
+    if(upper==='TODO' || upper==='FIXME'){
+      dataType=upper;
+    }
+    return '<span class="badge" data-type="'+dataType+'">'+escText(upper)+'</span>';
+  }
+  function renderResult(data){
+    if(!data || typeof data !== 'object'){
+      return '<p>No results.</p>';
+    }
+    const rows=Array.isArray(data?.items)?data.items:[];
+    const errs=Array.isArray(data?.errors)?data.errors:[];
+    const parts=[];
+    if(errs.length>0){
+      let list='<ul>';
+      for(const e of errs){
+        const fileRaw=e.file||'(unknown)';
+        const lineRaw=e.line>0?String(e.line):'—';
+        const loc=fileRaw+':'+lineRaw;
+        list+='<li><code>'+escText(loc)+'</code> ['+escText(e.stage||'git')+'] '+escText(e.message||'')+'</li>';
+      }
+      list+='</ul>';
+      parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
+    }
+    if(!rows || rows.length===0){
+      parts.push('<p>No results.</p>');
+      return parts.join('');
+    }
+    const hasAge=!!data?.has_age;
+    const hasComment=!!data?.has_comment;
+    const hasMessage=!!data?.has_message;
+    const headerCells=['TYPE','AUTHOR','EMAIL','DATE'];
+    if(hasAge){headerCells.push('AGE');}
+    headerCells.push('COMMIT','LOCATION');
+    if(hasComment){headerCells.push('COMMENT');}
+    if(hasMessage){headerCells.push('MESSAGE');}
+    let h='<table><thead><tr>'+headerCells.map(hd=>'<th>'+hd+'</th>').join('')+'</tr></thead><tbody>';
+    for(const r of rows){
+      const cells=[];
+      cells.push('<td>'+renderBadge(r.kind)+'</td>');
+      cells.push('<td>'+escText(r.author||'')+'</td>');
+      cells.push('<td>'+escText(r.email||'')+'</td>');
+      cells.push('<td>'+escText(r.date||'')+'</td>');
+      if(hasAge){
+        const ageRaw=r.age_days==null?'':String(r.age_days);
+        cells.push('<td>'+escText(ageRaw)+'</td>');
+      }
+      cells.push('<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>');
+      const fileRaw=r.file==null?'':String(r.file);
+      const lineRaw=r.line==null||r.line===0?'':String(r.line);
+      const loc=fileRaw+':'+lineRaw;
+      cells.push('<td><code>'+escText(loc)+'</code></td>');
+      if(hasComment){
+        cells.push('<td>'+escText(r.comment||'')+'</td>');
+      }
+      if(hasMessage){
+        cells.push('<td>'+escText(r.message||'')+'</td>');
+      }
+      h+='<tr>'+cells.join('')+'</tr>';
+    }
+    h+='</tbody></table>';
+    parts.push(h);
+    return parts.join('');
+  }
+  </script>
+</body>
+</html>

@@ -14,6 +14,7 @@ identify **who introduced or last touched** those lines in seconds—either from
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
 - Output formats: `table`, `tsv`, `json`.
 - Color-aware tables: `--color {auto|always|never}` with automatic detection of `NO_COLOR`, `CLICOLOR`, and friends.
+- Accessible label palette: TODO/FIXME colors adapt to light/dark terminal backgrounds for WCAG AA contrast.
 - Progress bar: one-line TTY updates with smoothed ETA/P90 bands (disable with `--no-progress`).
 - Web mode: `todox serve` exposes a minimal UI plus a JSON API and streaming progress via `/api/scan/stream`.
 
@@ -77,6 +78,10 @@ The web form mirrors the server defaults: *ignore whitespace* starts checked (ma
 
 ---
 
+The embedded CSS honours `prefers-color-scheme` so light/dark mode follows the OS, and TODO/FIXME badges use WCAG AA-compliant foreground/background pairs.
+
+---
+
 ## Dev Container (recommended development setup)
 
 The provided Dev Container gives you a reproducible environment.
@@ -124,9 +129,12 @@ make build
 - Color profiles are inferred automatically:
   - `COLORTERM=truecolor|24bit` → True Color gradients for the AGE column.
   - `TERM=*256color` → ANSI 256-color gradients.
-  - Other terminals fall back to the basic 8-color palette.
+  - Other terminals fall back to the basic 8-color palette (TODO = yellow, FIXME = red; overall contrast follows your terminal's palette definitions).
 - The AGE gradient scales itself to your repository. The 95th percentile of ages (with a minimum ceiling of 120 days)
   is treated as "fully red" so that outliers do not drown out day-to-day differences.
+- `COLORFGBG` (when exported by your terminal) guides TODO/FIXME hues so bright/light backgrounds keep ≥4.5:1 contrast; unknown terminals fall back to a safe dark profile.
+- When `COLORFGBG` is absent but `TERM` includes `"light"`, todox assumes a light background before defaulting to the dark palette.
+- In True Color mode the TODO/FIXME palette is validated against WCAG AA contrast thresholds; ANSI 256 and 8-color modes keep the same hue intent but final contrast depends on your terminal's palette definitions.
 - When piping colored output, use a pager that preserves ANSI escapes, for example:
 
 ```

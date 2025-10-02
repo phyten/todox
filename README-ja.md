@@ -17,6 +17,7 @@
 - 表示幅制御：`--truncate`, `--truncate-comment`, `--truncate-message`
 - 出力：`table` / `tsv` / `json`
 - 表の色付け：`--color {auto|always|never}`（`NO_COLOR` / `CLICOLOR` 等を自動検出）
+- TODO/FIXME ラベルの配色は端末の背景の明暗に追従し、WCAG AA 相当のコントラストを確保します。
 - 進捗表示：TTY のみ stderr に 1 行上書き、ETA/P90 を平滑化して表示（`--no-progress` あり）
 - Web：`todox serve` で簡易 UI・JSON API・`/api/scan/stream` によるストリーミング進捗
 
@@ -78,6 +79,10 @@ Web フォームはサーバー既定に合わせています。`ignore whitespa
 
 ---
 
+埋め込み CSS は OS の `prefers-color-scheme` を参照してライト/ダークに追従し、TODO/FIXME バッジは WCAG AA を満たす前景/背景の組み合わせで表示されます。
+
+---
+
 ## Dev Container（推奨の開発環境）
 
 Dev Containers CLI を使ってリポジトリを再現性高く立ち上げられます。
@@ -125,9 +130,12 @@ make build
 - カラープロファイルも自動判定します。
   - `COLORTERM=truecolor|24bit` → AGE 列を True Color グラデーションで表示。
   - `TERM=*256color` → ANSI 256 色グラデーション。
-  - それ以外は 8 色パレットでバケット化（TODO=青, FIXME=赤, AGE は段階色）。
+  - それ以外は 8 色パレットでバケット化（TODO=黄, FIXME=赤, AGE は段階色。最終的なコントラストは端末パレットに依存）。
 - AGE のグラデーションはリポジトリに応じて自動スケーリングされます。年齢の 95 パーセンタイル（下限 120 日）を
   「最も赤い値」として扱い、極端な古い TODO が全体を赤一色にしないよう調整しています。
+- 端末が `COLORFGBG` を公開している場合は TODO/FIXME の色味を背景の明暗に合わせ、未知の場合は暗背景向けの配色を既定にします。
+- `COLORFGBG` が未設定でも `TERM` に "light" が含まれていれば明背景と推定し、それ以外は暗背景扱いになります。
+- True Color 環境では TODO/FIXME の前景色を WCAG AA コントラストに照らして検証します（256/8 色では意図した色味を維持しますが、最終的なコントラストは端末側パレットに依存します）。
 - 色付き出力をパイプする場合は ANSI エスケープを解釈できるページャ（例: `less -R`）を利用してください。
 
 ```

@@ -1,0 +1,185 @@
+:root {
+  color-scheme: light dark;
+  --page-bg: #ffffff;
+  --page-fg: #111827;
+  --surface: #f9fafb;
+  --border: #d1d5db;
+  --muted: #6b7280;
+  --input-bg: #ffffff;
+  --input-border: #cbd5f5;
+  --link: #1d4ed8;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-fg: #7f1d1d;
+  --badge-ring-opacity: 0.35;
+  --badge-todo-bg: #f59e0b;
+  --badge-todo-fg: #111827;
+  --badge-fixme-bg: #dc2626;
+  --badge-fixme-fg: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page-bg: #0f172a;
+    --page-fg: #e2e8f0;
+    --surface: #1e293b;
+    --border: #334155;
+    --muted: #94a3b8;
+    --input-bg: #1e293b;
+    --input-border: #475569;
+    --link: #93c5fd;
+    --error-bg: #471515;
+    --error-border: #b91c1c;
+    --error-fg: #fecaca;
+    --badge-ring-opacity: 0.55;
+    --badge-todo-bg: #92400e;
+    --badge-todo-fg: #fff7ed;
+    --badge-fixme-bg: #b91c1c;
+    --badge-fixme-fg: #ffffff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 20px;
+  font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--page-bg);
+  color: var(--page-fg);
+}
+
+h2 {
+  margin-top: 0;
+}
+
+label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  margin-bottom: 8px;
+  color: inherit;
+}
+
+select,
+input[type="text"],
+input[type="number"] {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: inherit;
+  min-height: 28px;
+}
+
+input[type="text"] {
+  width: 240px;
+}
+
+button {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 12px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+
+button:hover,
+button:focus {
+  border-color: var(--link);
+  outline: none;
+}
+
+.small {
+  color: var(--muted);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--page-bg);
+}
+
+th,
+td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: inherit;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.errors {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-fg);
+  padding: 8px;
+  margin: 12px 0;
+  border-radius: 6px;
+}
+
+.error-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-fg);
+  padding: 8px 12px;
+  margin: 12px 0;
+  border-radius: 6px;
+}
+
+.error-banner button {
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+  margin-left: 12px;
+}
+
+.badge {
+  --badge-bg: var(--surface);
+  --badge-fg: currentColor;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+  line-height: 1.1;
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  border: 1px solid rgba(0, 0, 0, var(--badge-ring-opacity));
+}
+
+.badge[data-type="TODO"] {
+  --badge-bg: var(--badge-todo-bg);
+  --badge-fg: var(--badge-todo-fg);
+}
+
+.badge[data-type="FIXME"] {
+  --badge-bg: var(--badge-fixme-bg);
+  --badge-fg: var(--badge-fixme-fg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge {
+    border-color: rgba(255, 255, 255, var(--badge-ring-opacity));
+  }
+}

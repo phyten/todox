@@ -1,6 +1,10 @@
 package termcolor
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/phyten/todox/internal/colorutil"
+)
 
 func TestHeaderStyle(t *testing.T) {
 	s := HeaderStyle()
@@ -9,13 +13,41 @@ func TestHeaderStyle(t *testing.T) {
 	}
 }
 
-func TestTypeStyle(t *testing.T) {
-	todo := TypeStyle("todo")
-	if todo.FGBasic == nil || *todo.FGBasic != 4 {
-		t.Fatalf("TODO style should be blue, got %+v", todo)
+func TestTypeStyleRespectsScheme(t *testing.T) {
+	todoDark := TypeStyle("todo", SchemeDark, ProfileBasic8)
+	if todoDark.FGBasic == nil || *todoDark.FGBasic != 3 || !todoDark.Bold {
+		t.Fatalf("TODO dark basic style mismatch: %+v", todoDark)
 	}
-	none := TypeStyle("other")
-	if none.FGBasic != nil {
+	todoLight := TypeStyle("todo", SchemeLight, ProfileANSI256)
+	if todoLight.FG256 == nil || *todoLight.FG256 != 130 {
+		t.Fatalf("TODO light 256 color mismatch: %+v", todoLight)
+	}
+	todoTrue := TypeStyle("todo", SchemeLight, ProfileTrueColor)
+	if todoTrue.FGTrue == nil {
+		t.Fatalf("TODO light truecolor missing fg: %+v", todoTrue)
+	}
+	todoRGB := *todoTrue.FGTrue
+	todoContrast := colorutil.ContrastRatio(
+		colorutil.RGB{R: todoRGB[0], G: todoRGB[1], B: todoRGB[2]},
+		colorutil.RGB{R: 249, G: 250, B: 251},
+	)
+	if todoContrast < 4.5 {
+		t.Fatalf("TODO light truecolor contrast %.2f < 4.5 (rgb=%v)", todoContrast, todoRGB)
+	}
+	fixmeLight := TypeStyle("fixme", SchemeLight, ProfileTrueColor)
+	if fixmeLight.FGTrue == nil {
+		t.Fatalf("FIXME light truecolor missing fg: %+v", fixmeLight)
+	}
+	rgb := *fixmeLight.FGTrue
+	contrast := colorutil.ContrastRatio(
+		colorutil.RGB{R: rgb[0], G: rgb[1], B: rgb[2]},
+		colorutil.RGB{R: 249, G: 250, B: 251},
+	)
+	if contrast < 4.5 {
+		t.Fatalf("FIXME light truecolor contrast %.2f < 4.5 (rgb=%v)", contrast, rgb)
+	}
+	none := TypeStyle("other", SchemeDark, ProfileBasic8)
+	if none.FGBasic != nil || none.FG256 != nil || none.FGTrue != nil {
 		t.Fatalf("non TODO/FIXME should have no color: %+v", none)
 	}
 }

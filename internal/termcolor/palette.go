@@ -3,23 +3,74 @@ package termcolor
 import (
 	"math"
 	"strings"
+
+	"github.com/phyten/todox/internal/colorutil"
 )
 
 func HeaderStyle() Style {
 	return Style{Bold: true, Underline: true}
 }
 
-func TypeStyle(kind string) Style {
-	switch strings.ToUpper(strings.TrimSpace(kind)) {
+func TypeStyle(kind string, scheme Scheme, profile Profile) Style {
+	normalized := strings.ToUpper(strings.TrimSpace(kind))
+	switch normalized {
 	case "TODO":
-		color := 4
-		return Style{FGBasic: &color}
+		return todoStyle(scheme, profile)
 	case "FIXME":
-		color := 1
-		return Style{FGBasic: &color}
+		return fixmeStyle(scheme, profile)
 	default:
 		return Style{}
 	}
+}
+
+func todoStyle(scheme Scheme, profile Profile) Style {
+	style := Style{Bold: true}
+	switch profile {
+	case ProfileTrueColor:
+		var rgb [3]uint8
+		if scheme == SchemeLight {
+			rgb = [3]uint8{146, 64, 14}
+		} else {
+			rgb = [3]uint8{251, 191, 36}
+		}
+		rgb = ensureTrueColorContrast(rgb, scheme)
+		style.FGTrue = &rgb
+	case ProfileANSI256:
+		color := 178
+		if scheme == SchemeLight {
+			color = 130
+		}
+		style.FG256 = &color
+	default:
+		color := 3
+		style.FGBasic = &color
+	}
+	return style
+}
+
+func fixmeStyle(scheme Scheme, profile Profile) Style {
+	style := Style{Bold: true}
+	switch profile {
+	case ProfileTrueColor:
+		var rgb [3]uint8
+		if scheme == SchemeLight {
+			rgb = [3]uint8{185, 28, 28}
+		} else {
+			rgb = [3]uint8{239, 68, 68}
+		}
+		rgb = ensureTrueColorContrast(rgb, scheme)
+		style.FGTrue = &rgb
+	case ProfileANSI256:
+		color := 203
+		if scheme == SchemeLight {
+			color = 124
+		}
+		style.FG256 = &color
+	default:
+		color := 1
+		style.FGBasic = &color
+	}
+	return style
 }
 
 func AgeStyle(age int, profile Profile, maxAge float64) Style {
@@ -95,4 +146,18 @@ func rgbToANSI256(r, g, b uint8) int {
 	gg := int(g) * 5 / 255
 	bb := int(b) * 5 / 255
 	return 16 + 36*rr + 6*gg + bb
+}
+
+func ensureTrueColorContrast(rgb [3]uint8, scheme Scheme) [3]uint8 {
+	fg := colorutil.RGB{R: rgb[0], G: rgb[1], B: rgb[2]}
+	bg := schemeBackgroundRGB(scheme)
+	ensured := colorutil.EnsureContrast(fg, bg, 4.5)
+	return [3]uint8{ensured.R, ensured.G, ensured.B}
+}
+
+func schemeBackgroundRGB(scheme Scheme) colorutil.RGB {
+	if scheme == SchemeLight {
+		return colorutil.RGB{R: 249, G: 250, B: 251}
+	}
+	return colorutil.RGB{R: 17, G: 24, B: 39}
 }

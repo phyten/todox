@@ -369,7 +369,7 @@ func TestPrintTableはカラーを有効化するとANSIコードを含む(t *te
 	if !strings.Contains(text, "\x1b[1;4mTYPE") {
 		t.Fatalf("ヘッダーの装飾が付与されていません: %q", text)
 	}
-	if !strings.Contains(text, "\x1b[34mTODO") {
+	if !strings.Contains(text, "\x1b[1;33mTODO") {
 		t.Fatalf("TYPE 列に色が付与されていません: %q", text)
 	}
 }
