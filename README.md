@@ -145,6 +145,9 @@ todox --with-age --color always | less -R
 ![Colorized table output](docs/color-table.png)
 
 > JSON output always includes an `age_days` field for each item.
+> When link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`; these fields are part of the public API surface and will remain stable.
+
+`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-link`, so the URL column renders correctly across table/TSV/JSON outputs.
 
 ### Extra columns (hidden by default)
 
@@ -152,6 +155,11 @@ todox --with-age --color always | less -R
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
 - `--with-age`: append an AGE (days since author date) column to table/TSV outputs
+- `--with-link`: include a URL column with GitHub blob links (uses the `origin` remote by default)
+  - Override the remote name with `TODOX_LINK_REMOTE=<name>` when `origin` is not available (for example `upstream`).
+  - Override the scheme with `TODOX_LINK_SCHEME=http` when your GitHub Enterprise appliance is served over plain HTTP.
+  - Remote resolution failures do not abort the scan; URLs are left blank and a warning is recorded in `errors[]` / `error_count`.
+  - Markdown files append `?plain=1#L<n>` to avoid GitHub anchor collisions with the rendered view.
 - `--full`: shorthand for `--with-comment --with-message`
 
 ### Truncation controls
@@ -182,13 +190,19 @@ Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining
 
 Full help: `./bin/todox -h` (bilingual output and examples).
 
+### GitHub helpers
+
+- `todox pr find --commit <sha>`: list pull requests containing the commit
+- `todox pr open --commit <sha>`: open the first matching pull request in your browser
+- `todox pr create --commit <sha>`: create a pull request via the GitHub CLI (`gh`). Supports `--source` and `--base` overrides. Lookup helpers fall back to REST when `GH_TOKEN`/`GITHUB_TOKEN` is present, but creation itself still requires the `gh` binary.
+
 ### Input normalization & validation (CLI / Web)
 
 Both the CLI flags and the `/api/scan` query parameters share the same normalization layer. All inputs are case-insensitive unless noted.
 
 | Parameter | Accepted values | Validation |
 | --- | --- | --- |
-| Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `ignore_ws`, etc.) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
+| Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `--with-link`, `with_link`, `ignore_ws`, etc.) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
 | `--type`, `type` | `todo`, `fixme`, `both` | Unknown values are rejected. |
 | `--mode`, `mode` | `last`, `first` | Unknown values are rejected. |
 | `--output` | `table`, `tsv`, `json` | Unknown values are rejected (CLI only). |

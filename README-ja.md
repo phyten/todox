@@ -146,6 +146,9 @@ todox --with-age --color always | less -R
 ![色付きテーブルの例](docs/color-table.png)
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
+> `--with-link` を有効にした場合は各 item に `url`、Result に `has_url` が追加されます。これらは公開 API の一部であり将来も保持されます。
+
+`--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。
 
 ### 追加列（非表示が既定）
 
@@ -153,6 +156,11 @@ todox --with-age --color always | less -R
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
 - `--with-age` : table / TSV に AGE（日数）列を追加
+- `--with-link` : URL 列を追加（GitHub 上の該当行リンク。既定では `origin` リモートを参照）
+  - `origin` 以外を使う場合は `TODOX_LINK_REMOTE=<リモート名>` を設定してください（例: `upstream`）。
+  - 社内 GHES など HTTP 配信のみの環境では `TODOX_LINK_SCHEME=http` を指定するとリンク生成に HTTP を使います。
+  - リモート解析に失敗してもスキャン自体は成功し、URL 列は空欄・警告は `errors[]` / `error_count` に記録されます。
+  - Markdown ファイルでは `?plain=1#L<n>` を付与し、GitHub のレンダリングビューとアンカー競合しないようにしています。
 - `--full` : `--with-comment --with-message` のショートカット
 
 ### 表示幅制御
@@ -183,13 +191,19 @@ todox --with-age --color always | less -R
 
 ヘルプ：`./bin/todox -h`（英語/日本語の両対応、例付き）
 
+### GitHub 連携コマンド
+
+- `todox pr find --commit <sha>` : 指定コミットを含む PR を一覧表示
+- `todox pr open --commit <sha>` : 最初に見つかった PR をブラウザで開く
+- `todox pr create --commit <sha>` : gh CLI 経由で PR を作成（`--source` や `--base` で調整可能）。`GH_TOKEN`/`GITHUB_TOKEN` があれば検索系は REST で動作しますが、PR 作成そのものには `gh` バイナリが必要です。
+
 ### 入力の正規化と検証（CLI / Web 共通）
 
 CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レイヤーで処理されます（特記がない限り、大文字小文字は区別しません）。
 
 | パラメータ | 受理する値 | 検証内容 |
 | --- | --- | --- |
-| 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`ignore_ws` など） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
+| 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`--with-link`、`with_link`、`ignore_ws` など） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
 | `--type`, `type` | `todo` / `fixme` / `both` | 未知の値はエラーになります。 |
 | `--mode`, `mode` | `last` / `first` | 未知の値はエラーになります。 |
 | `--output` | `table` / `tsv` / `json` | 未知の値はエラーになります（CLI のみ）。 |
