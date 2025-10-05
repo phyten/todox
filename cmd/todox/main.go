@@ -409,6 +409,15 @@ func scanCmd(args []string) {
 
 	runner := execx.DefaultRunner()
 
+	var obs progress.Observer
+	if cfg.opts.Progress {
+		obs = progress.NewAutoObserver(os.Stderr)
+		cfg.opts.ProgressObserver = obs
+		cfg.opts.Progress = false
+	} else {
+		obs = cfg.opts.ProgressObserver
+	}
+
 	res, err := engine.Run(cfg.opts)
 	if err != nil {
 		log.Fatal(err)
@@ -422,12 +431,19 @@ func scanCmd(args []string) {
 	ctx := context.Background()
 	var remoteCache remoteInfoCache
 	_ = applyLinkColumn(ctx, runner, cfg.opts.RepoDir, &remoteCache, res, fieldSel)
+	prStart := time.Time{}
+	if fieldSel.NeedPRs {
+		prStart = time.Now()
+	}
 	_ = applyPRColumns(ctx, runner, cfg.opts.RepoDir, &remoteCache, res, fieldSel, prOptions{
 		State:  cfg.prState,
 		Limit:  cfg.prLimit,
 		Prefer: cfg.prPrefer,
 		Jobs:   cfg.opts.Jobs,
-	})
+	}, obs)
+	if !prStart.IsZero() {
+		res.ElapsedMS += time.Since(prStart).Milliseconds()
+	}
 
 	switch strings.ToLower(cfg.output) {
 	case "json":
@@ -793,8 +809,10 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 }
 
 type streamObserver struct {
-	ch   chan progress.Snapshot
-	once sync.Once
+	ch     chan progress.Snapshot
+	once   sync.Once
+	mu     sync.Mutex
+	closed bool
 }
 
 func newStreamObserver(buffer int) (*streamObserver, <-chan progress.Snapshot) {
@@ -803,6 +821,11 @@ func newStreamObserver(buffer int) (*streamObserver, <-chan progress.Snapshot) {
 }
 
 func (o *streamObserver) Publish(s progress.Snapshot) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return
+	}
 	select {
 	case o.ch <- s:
 	default:
@@ -814,9 +837,38 @@ func (o *streamObserver) Publish(s progress.Snapshot) {
 
 func (o *streamObserver) Done(s progress.Snapshot) {
 	o.Publish(s)
+	o.Close()
+}
+
+func (o *streamObserver) Close() {
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
+		return
+	}
+	o.closed = true
 	o.once.Do(func() {
 		close(o.ch)
 	})
+	o.mu.Unlock()
+}
+
+type suppressCloseObserver struct {
+	base *streamObserver
+}
+
+func (o suppressCloseObserver) Publish(s progress.Snapshot) {
+	if o.base == nil {
+		return
+	}
+	o.base.Publish(s)
+}
+
+func (o suppressCloseObserver) Done(s progress.Snapshot) {
+	if o.base == nil {
+		return
+	}
+	o.base.Publish(s)
 }
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
@@ -892,12 +944,19 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 		ctx := r.Context()
 		var remoteCache remoteInfoCache
 		_ = applyLinkColumn(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel)
+		prStart := time.Time{}
+		if inputs.FieldSel.NeedPRs {
+			prStart = time.Now()
+		}
 		_ = applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
 			State:  inputs.PRState,
 			Limit:  inputs.PRLimit,
 			Prefer: inputs.PRPrefer,
 			Jobs:   inputs.Options.Jobs,
-		})
+		}, nil)
+		if !prStart.IsZero() {
+			res.ElapsedMS += time.Since(prStart).Milliseconds()
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(res)
 	}
@@ -925,14 +984,20 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		_, _ = fmt.Fprint(w, "retry: 3000\n\n")
 		flusher.Flush()
 
-		obs, snapCh := newStreamObserver(64)
+		obsCore, snapCh := newStreamObserver(64)
 		inputs.Options.Progress = false
-		inputs.Options.ProgressObserver = obs
+		inputs.Options.ProgressObserver = suppressCloseObserver{base: obsCore}
 
 		runner := execx.DefaultRunner()
 
 		resCh := make(chan *engine.Result, 1)
 		errCh := make(chan error, 1)
+
+		type prStageResult struct {
+			elapsed time.Duration
+			err     error
+			hadPRs  bool
+		}
 
 		const pingInterval = 30 * time.Second
 		pingTicker := time.NewTicker(pingInterval)
@@ -949,13 +1014,17 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 
 		ctx := r.Context()
 		var remoteCache remoteInfoCache
+		var currentRes *engine.Result
+		var prDoneCh <-chan prStageResult
 
-		for snapCh != nil || resCh != nil || errCh != nil {
+		for snapCh != nil || resCh != nil || errCh != nil || prDoneCh != nil {
 			select {
 			case <-ctx.Done():
+				obsCore.Close()
 				return
 			case <-pingTicker.C:
 				if err := writeSSE(w, flusher, "ping", map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+					obsCore.Close()
 					return
 				}
 			case snap, ok := <-snapCh:
@@ -964,6 +1033,7 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 					continue
 				}
 				if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
+					obsCore.Close()
 					return
 				}
 			case res := <-resCh:
@@ -972,18 +1042,48 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 				res.HasMessage = inputs.FieldSel.ShowMessage
 				res.HasAge = inputs.FieldSel.ShowAge
 				_ = applyLinkColumn(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel)
-				_ = applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
-					State:  inputs.PRState,
-					Limit:  inputs.PRLimit,
-					Prefer: inputs.PRPrefer,
-					Jobs:   inputs.Options.Jobs,
-				})
-				if err := writeSSE(w, flusher, "result", res); err != nil {
+
+				currentRes = res
+				prChan := make(chan prStageResult, 1)
+				if inputs.FieldSel.NeedPRs {
+					go func(res *engine.Result) {
+						start := time.Now()
+						err := applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
+							State:  inputs.PRState,
+							Limit:  inputs.PRLimit,
+							Prefer: inputs.PRPrefer,
+							Jobs:   inputs.Options.Jobs,
+						}, obsCore)
+						elapsed := time.Since(start)
+						res.ElapsedMS += elapsed.Milliseconds()
+						prChan <- prStageResult{elapsed: elapsed, err: err, hadPRs: true}
+						close(prChan)
+					}(res)
+				} else {
+					prChan <- prStageResult{hadPRs: false}
+					close(prChan)
+				}
+				prDoneCh = prChan
+				resCh = nil
+			case prStage, ok := <-prDoneCh:
+				if !ok {
+					prDoneCh = nil
+					continue
+				}
+				if prStage.err != nil {
+					obsCore.Close()
+					_ = writeSSE(w, flusher, "error", map[string]string{"message": prStage.err.Error()})
 					return
 				}
-				resCh = nil
+				if err := writeSSE(w, flusher, "result", currentRes); err != nil {
+					obsCore.Close()
+					return
+				}
+				obsCore.Close()
+				prDoneCh = nil
 				errCh = nil
 			case runErr := <-errCh:
+				obsCore.Close()
 				_ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
 				return
 			}
@@ -1067,7 +1167,7 @@ func applyLinkColumn(ctx context.Context, runner execx.Runner, repoDir string, c
 	return nil
 }
 
-func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel FieldSelection, opts prOptions) error {
+func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel FieldSelection, opts prOptions, obs progress.Observer) error {
 	if res == nil {
 		return nil
 	}
@@ -1091,7 +1191,21 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 		}
 		commitToIndexes[sha] = append(commitToIndexes[sha], idx)
 	}
+	var estimator *progress.Estimator
+	if obs != nil {
+		estimator = progress.NewEstimator(len(commits), progress.Config{})
+		if snap, changed := estimator.Stage(progress.StagePR); changed {
+			obs.Publish(snap)
+		}
+	}
 	if len(commits) == 0 {
+		if estimator != nil {
+			finalSnap := estimator.Complete()
+			if obs != nil {
+				obs.Publish(finalSnap)
+				obs.Done(finalSnap)
+			}
+		}
 		return nil
 	}
 
@@ -1099,6 +1213,11 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 	if err != nil {
 		msg := "failed to determine git remote: " + err.Error()
 		recordPRStageError(res, msg)
+		if estimator != nil && obs != nil {
+			finalSnap := estimator.Complete()
+			obs.Publish(finalSnap)
+			obs.Done(finalSnap)
+		}
 		return nil
 	}
 
@@ -1146,9 +1265,18 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 	for {
 		select {
 		case <-ctx.Done():
+			if estimator != nil && obs != nil {
+				snap, _ := estimator.Stage(progress.StagePR)
+				obs.Done(snap)
+			}
 			return nil
 		case result, ok := <-results:
 			if !ok {
+				if estimator != nil && obs != nil {
+					finalSnap := estimator.Complete()
+					obs.Publish(finalSnap)
+					obs.Done(finalSnap)
+				}
 				res.ErrorCount = len(res.Errors)
 				return nil
 			}
@@ -1174,6 +1302,11 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 			}
 			for _, idx := range commitToIndexes[result.commit] {
 				res.Items[idx].PRs = append([]engine.PullRequestRef(nil), refs...)
+			}
+			if estimator != nil && obs != nil {
+				if snap, notify := estimator.Advance(1); notify {
+					obs.Publish(snap)
+				}
 			}
 		}
 	}

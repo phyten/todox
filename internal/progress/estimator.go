@@ -11,6 +11,7 @@ type Stage string
 const (
 	StageScan Stage = "scan"
 	StageAttr Stage = "attr"
+	StagePR   Stage = "pr"
 )
 
 type Snapshot struct {
