@@ -19,9 +19,11 @@ type FieldSelection struct {
 	ShowComment bool
 	ShowMessage bool
 	ShowURL     bool
+	ShowPRs     bool
 	NeedComment bool
 	NeedMessage bool
 	NeedURL     bool
+	NeedPRs     bool
 }
 
 type fieldMeta struct {
@@ -30,22 +32,27 @@ type fieldMeta struct {
 	isComment bool
 	isMessage bool
 	isURL     bool
+	isPR      bool
 }
 
 var fieldRegistry = map[string]fieldMeta{
-	"type":     {header: "TYPE"},
-	"author":   {header: "AUTHOR"},
-	"email":    {header: "EMAIL"},
-	"date":     {header: "DATE"},
-	"age":      {header: "AGE", isAge: true},
-	"commit":   {header: "COMMIT"},
-	"location": {header: "LOCATION"},
-	"comment":  {header: "COMMENT", isComment: true},
-	"message":  {header: "MESSAGE", isMessage: true},
-	"url":      {header: "URL", isURL: true},
+	"type":       {header: "TYPE"},
+	"author":     {header: "AUTHOR"},
+	"email":      {header: "EMAIL"},
+	"date":       {header: "DATE"},
+	"age":        {header: "AGE", isAge: true},
+	"commit":     {header: "COMMIT"},
+	"location":   {header: "LOCATION"},
+	"comment":    {header: "COMMENT", isComment: true},
+	"message":    {header: "MESSAGE", isMessage: true},
+	"url":        {header: "URL", isURL: true},
+	"commit_url": {header: "URL", isURL: true},
+	"pr":         {header: "PR", isPR: true},
+	"prs":        {header: "PRS", isPR: true},
+	"pr_urls":    {header: "PR_URLS", isPR: true},
 }
 
-func ResolveFields(raw string, withComment, withMessage, withAge, withURL bool) (FieldSelection, error) {
+func ResolveFields(raw string, withComment, withMessage, withAge, withURL, withPRs bool) (FieldSelection, error) {
 	raw = strings.TrimSpace(raw)
 	sel := FieldSelection{}
 	if raw == "" {
@@ -56,6 +63,9 @@ func ResolveFields(raw string, withComment, withMessage, withAge, withURL bool) 
 		keys = append(keys, "commit", "location")
 		if withURL {
 			keys = append(keys, "url")
+		}
+		if withPRs {
+			keys = append(keys, "prs")
 		}
 		if withComment {
 			keys = append(keys, "comment")
@@ -72,9 +82,11 @@ func ResolveFields(raw string, withComment, withMessage, withAge, withURL bool) 
 		sel.ShowComment = withComment
 		sel.ShowMessage = withMessage
 		sel.ShowURL = withURL
+		sel.ShowPRs = withPRs
 		sel.NeedComment = withComment
 		sel.NeedMessage = withMessage
 		sel.NeedURL = withURL
+		sel.NeedPRs = withPRs
 		return sel, nil
 	}
 
@@ -103,10 +115,14 @@ func ResolveFields(raw string, withComment, withMessage, withAge, withURL bool) 
 		if meta.isURL {
 			sel.ShowURL = true
 		}
+		if meta.isPR {
+			sel.ShowPRs = true
+		}
 	}
 	sel.NeedComment = withComment || sel.ShowComment
 	sel.NeedMessage = withMessage || sel.ShowMessage
 	sel.NeedURL = withURL || sel.ShowURL
+	sel.NeedPRs = withPRs || sel.ShowPRs
 	return sel, nil
 }
 
@@ -132,7 +148,54 @@ func formatFieldValue(it engine.Item, key string) string {
 		return it.Message
 	case "url":
 		return it.URL
+	case "commit_url":
+		return it.URL
+	case "pr":
+		if len(it.PRs) == 0 {
+			return ""
+		}
+		return formatPRSummary(it.PRs[0])
+	case "prs":
+		if len(it.PRs) == 0 {
+			return ""
+		}
+		return formatPRList(it.PRs)
+	case "pr_urls":
+		if len(it.PRs) == 0 {
+			return ""
+		}
+		return formatPRURLs(it.PRs)
 	default:
 		return ""
 	}
+}
+
+func formatPRSummary(pr engine.PullRequestRef) string {
+	state := strings.ToLower(strings.TrimSpace(pr.State))
+	if state == "" {
+		state = "unknown"
+	}
+	if pr.Number <= 0 {
+		return fmt.Sprintf("(%s)", state)
+	}
+	return fmt.Sprintf("#%d(%s)", pr.Number, state)
+}
+
+func formatPRList(prs []engine.PullRequestRef) string {
+	parts := make([]string, 0, len(prs))
+	for _, pr := range prs {
+		parts = append(parts, formatPRSummary(pr))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func formatPRURLs(prs []engine.PullRequestRef) string {
+	parts := make([]string, 0, len(prs))
+	for _, pr := range prs {
+		if strings.TrimSpace(pr.URL) == "" {
+			continue
+		}
+		parts = append(parts, pr.URL)
+	}
+	return strings.Join(parts, "; ")
 }

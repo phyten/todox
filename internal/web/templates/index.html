@@ -32,6 +32,25 @@
     <label>path regex: <input name="path_regex" type="text" placeholder="\\.go$"></label>
     <label><input type="checkbox" name="with_comment"> comment</label>
     <label><input type="checkbox" name="with_message"> message</label>
+    <label><input type="checkbox" name="with_commit_link"> commit link</label>
+    <label><input type="checkbox" name="with_pr_links"> PR links</label>
+    <label>PR state:
+      <select name="pr_state">
+        <option value="all">all</option>
+        <option value="open">open</option>
+        <option value="merged">merged</option>
+        <option value="closed">closed</option>
+      </select>
+    </label>
+    <label>PR prefer:
+      <select name="pr_prefer">
+        <option value="open">open</option>
+        <option value="merged">merged</option>
+        <option value="closed">closed</option>
+        <option value="none">none</option>
+      </select>
+    </label>
+    <label>PR limit: <input type="number" name="pr_limit" min="1" max="20" value="3" inputmode="numeric" pattern="[0-9]*"></label>
     <label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
     <label><input type="checkbox" name="exclude_typical"> exclude typical dirs</label>
     <label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
@@ -120,15 +139,16 @@
         throw new Error(msg);
       }
       let data=null;
-      if(raw.trim()!==''){
+      const trimmed=raw.trim();
+      if(trimmed!==''){
         try{
-          data=JSON.parse(raw);
+          data=JSON.parse(trimmed);
         }catch(parseErr){
           const detail=parseErr instanceof Error?parseErr.message:String(parseErr);
           throw new Error('Failed to parse response JSON: '+detail);
         }
       }
-      out.innerHTML=renderResult(data);
+      out.innerHTML=render(data);
     }catch(err){
       console.error(err);
       showError(err instanceof Error?err.message:String(err));
@@ -139,6 +159,14 @@
       .replace(/&/g,'&amp;')
       .replace(/</g,'&lt;')
       .replace(/>/g,'&gt;');
+  }
+  function escAttr(value){
+    return String(value||'')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
   }
   function renderBadge(kind){
     const raw=String(kind||'');
@@ -152,20 +180,21 @@
     }
     return '<span class="badge" data-type="'+dataType+'">'+escText(upper)+'</span>';
   }
-  function renderResult(data){
-    if(!data || typeof data !== 'object'){
+  function render(data){
+    if(!data || typeof data!=='object'){
       return '<p>No results.</p>';
     }
-    const rows=Array.isArray(data?.items)?data.items:[];
-    const errs=Array.isArray(data?.errors)?data.errors:[];
+    const rows=Array.isArray(data.items)?data.items:[];
+    const errs=Array.isArray(data.errors)?data.errors:[];
     const parts=[];
     if(errs.length>0){
       let list='<ul>';
       for(const e of errs){
-        const fileRaw=e.file||'(unknown)';
-        const lineRaw=e.line>0?String(e.line):'—';
+        const fileRaw=e&&e.file?e.file:'(unknown)';
+        const lineRaw=e&&typeof e.line==='number'&&e.line>0?String(e.line):'—';
         const loc=fileRaw+':'+lineRaw;
-        list+='<li><code>'+escText(loc)+'</code> ['+escText(e.stage||'git')+'] '+escText(e.message||'')+'</li>';
+        const stage=e&&e.stage?e.stage:'git';
+        list+='<li><code>'+escText(loc)+'</code> ['+escText(stage)+'] '+escText(e&&e.message?e.message:'')+'</li>';
       }
       list+='</ul>';
       parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
@@ -174,35 +203,78 @@
       parts.push('<p>No results.</p>');
       return parts.join('');
     }
-    const hasAge=!!data?.has_age;
-    const hasComment=!!data?.has_comment;
-    const hasMessage=!!data?.has_message;
+    const hasAge=!!data.has_age;
+    const hasComment=!!data.has_comment;
+    const hasMessage=!!data.has_message;
+    const hasURL=!!data.has_url;
+    const hasPRS=!!data.has_prs;
     const headerCells=['TYPE','AUTHOR','EMAIL','DATE'];
     if(hasAge){headerCells.push('AGE');}
     headerCells.push('COMMIT','LOCATION');
+    if(hasURL){headerCells.push('URL');}
+    if(hasPRS){headerCells.push('PRS');}
     if(hasComment){headerCells.push('COMMENT');}
     if(hasMessage){headerCells.push('MESSAGE');}
     let h='<table><thead><tr>'+headerCells.map(hd=>'<th>'+hd+'</th>').join('')+'</tr></thead><tbody>';
     for(const r of rows){
       const cells=[];
-      cells.push('<td>'+renderBadge(r.kind)+'</td>');
-      cells.push('<td>'+escText(r.author||'')+'</td>');
-      cells.push('<td>'+escText(r.email||'')+'</td>');
-      cells.push('<td>'+escText(r.date||'')+'</td>');
+      cells.push('<td>'+renderBadge(r&&r.kind)+'</td>');
+      cells.push('<td>'+escText(r&&r.author)+'</td>');
+      cells.push('<td>'+escText(r&&r.email)+'</td>');
+      cells.push('<td>'+escText(r&&r.date)+'</td>');
       if(hasAge){
-        const ageRaw=r.age_days==null?'':String(r.age_days);
+        const ageRaw=r&&r.age_days!=null?String(r.age_days):'';
         cells.push('<td>'+escText(ageRaw)+'</td>');
       }
-      cells.push('<td><code>'+escText((r.commit||'').slice(0,8))+'</code></td>');
-      const fileRaw=r.file==null?'':String(r.file);
-      const lineRaw=r.line==null||r.line===0?'':String(r.line);
-      const loc=fileRaw+':'+lineRaw;
-      cells.push('<td><code>'+escText(loc)+'</code></td>');
+      const commitRaw=r&&r.commit?String(r.commit).slice(0,8):'';
+      cells.push('<td><code>'+escText(commitRaw)+'</code></td>');
+      const fileRaw=r&&r.file?String(r.file):'';
+      const lineRaw=r&&typeof r.line==='number'&&r.line>0?String(r.line):'';
+      cells.push('<td><code>'+escText(fileRaw+':'+lineRaw)+'</code></td>');
+      if(hasURL){
+        const urlRaw=r&&r.url?String(r.url):'';
+        if(urlRaw){
+          const href=escAttr(urlRaw);
+          cells.push('<td><a class="link-icon" href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="GitHub で開く"><span aria-hidden="true">🔗</span></a></td>');
+        }else{
+          cells.push('<td></td>');
+        }
+      }
+      if(hasPRS){
+        const list=Array.isArray(r&&r.prs)?r.prs:[];
+        if(list.length){
+          const entries=[];
+          for(const pr of list){
+            const num=pr&&typeof pr.number==='number'&&isFinite(pr.number)&&pr.number>0?pr.number:null;
+            const rawState=pr&&pr.state!=null?String(pr.state).trim():'';
+            const stateLower=rawState.toLowerCase();
+            const displayState=stateLower||'unknown';
+            const stateSuffix='('+escText(displayState)+')';
+            if(num!==null && pr && pr.url){
+              const href=escAttr(String(pr.url));
+              const ariaState=displayState?displayState.charAt(0).toUpperCase()+displayState.slice(1)+' ':'';
+              const aria=ariaState+'PR #'+num;
+              entries.push('<a href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="'+escAttr(aria)+'">#'+num+'</a>'+stateSuffix);
+            }else if(num!==null){
+              entries.push('#'+num+stateSuffix);
+            }else if(pr && pr.url){
+              const href=escAttr(String(pr.url));
+              const aria=displayState?displayState.charAt(0).toUpperCase()+displayState.slice(1)+' pull request':'Pull request';
+              entries.push('<a href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="'+escAttr(aria)+'">'+stateSuffix+'</a>');
+            }else{
+              entries.push(stateSuffix);
+            }
+          }
+          cells.push('<td>'+entries.join('; ')+'</td>');
+        }else{
+          cells.push('<td></td>');
+        }
+      }
       if(hasComment){
-        cells.push('<td>'+escText(r.comment||'')+'</td>');
+        cells.push('<td>'+escText(r&&r.comment)+'</td>');
       }
       if(hasMessage){
-        cells.push('<td>'+escText(r.message||'')+'</td>');
+        cells.push('<td>'+escText(r&&r.message)+'</td>');
       }
       h+='<tr>'+cells.join('')+'</tr>';
     }

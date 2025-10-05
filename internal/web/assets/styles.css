@@ -178,6 +178,18 @@ code {
   --badge-fg: var(--badge-fixme-fg);
 }
 
+a.link-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  font-size: 16px;
+}
+
+a.link-icon span {
+  line-height: 1;
+}
+
 @media (prefers-color-scheme: dark) {
   .badge {
     border-color: rgba(255, 255, 255, var(--badge-ring-opacity));

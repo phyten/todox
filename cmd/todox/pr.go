@@ -79,7 +79,7 @@ func prFind(args []string) {
 	if err != nil {
 		log.Fatalf("todox pr find: %v", err)
 	}
-	filtered, err := filterPRsByState(prs, *state)
+	filtered, err := filterPRsByState(prs, *state, "--state")
 	if err != nil {
 		log.Fatalf("todox pr find: %v", err)
 	}
@@ -129,7 +129,7 @@ func prOpen(args []string) {
 	if err != nil {
 		log.Fatalf("todox pr open: %v", err)
 	}
-	filtered, err := filterPRsByState(prs, *state)
+	filtered, err := filterPRsByState(prs, *state, "--state")
 	if err != nil {
 		log.Fatalf("todox pr open: %v", err)
 	}
@@ -249,17 +249,19 @@ func prCreate(args []string) {
 	fmt.Println(url)
 }
 
-func filterPRsByState(prs []ghclient.PRInfo, state string) ([]ghclient.PRInfo, error) {
+func filterPRsByState(prs []ghclient.PRInfo, state, flagName string) ([]ghclient.PRInfo, error) {
 	norm := strings.ToLower(strings.TrimSpace(state))
-	switch norm {
-	case "", "all":
-		norm = "all"
-	case "open", "closed", "merged":
-	default:
-		return nil, fmt.Errorf("invalid --state: %s", state)
-	}
-	if norm == "all" {
+	if norm == "" || norm == "all" {
 		return prs, nil
+	}
+	switch norm {
+	case "open", "closed", "merged":
+		// ok
+	default:
+		if flagName == "" {
+			flagName = "--state"
+		}
+		return nil, fmt.Errorf("invalid %s: %s", flagName, state)
 	}
 	out := make([]ghclient.PRInfo, 0, len(prs))
 	for _, pr := range prs {

@@ -130,7 +130,7 @@ make build
   - `COLORTERM=truecolor|24bit` → True Color gradients for the AGE column.
   - `TERM=*256color` → ANSI 256-color gradients.
   - Other terminals fall back to the basic 8-color palette (TODO = yellow, FIXME = red; overall contrast follows your terminal's palette definitions).
-- The AGE gradient scales itself to your repository. The 95th percentile of ages (with a minimum ceiling of 120 days)
+- The AGE gradient scales itself to your repository. The 95th percentile of ages (with a minimum of 120 days)
   is treated as "fully red" so that outliers do not drown out day-to-day differences.
 - `COLORFGBG` (when exported by your terminal) guides TODO/FIXME hues so bright/light backgrounds keep ≥4.5:1 contrast; unknown terminals fall back to a safe dark profile.
 - When `COLORFGBG` is absent but `TERM` includes `"light"`, todox assumes a light background before defaulting to the dark palette.
@@ -145,9 +145,16 @@ todox --with-age --color always | less -R
 ![Colorized table output](docs/color-table.png)
 
 > JSON output always includes an `age_days` field for each item.
-> When link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`; these fields are part of the public API surface and will remain stable.
+> When commit link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`. Enabling PR links populates `prs[]` alongside `has_prs`. These fields are part of the public API surface and will remain stable.
+> Note that `has_url` / `has_prs` indicate that the data was collected (via `--with-*` or explicit `--fields` selections); a column may still be hidden depending on the renderer.
 
-`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-link`, so the URL column renders correctly across table/TSV/JSON outputs.
+`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/TSV/JSON outputs.
+
+Fields you can reference via `--fields` (table/TSV outputs):
+- `type`, `author`, `email`, `date`, `age`, `commit`, `location` (`file:line`)
+- `comment`, `message`
+- `url` (alias: `commit_url`)
+- `pr`, `prs`, `pr_urls`
 
 ### Extra columns (hidden by default)
 
@@ -155,11 +162,18 @@ todox --with-age --color always | less -R
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
 - `--with-age`: append an AGE (days since author date) column to table/TSV outputs
-- `--with-link`: include a URL column with GitHub blob links (uses the `origin` remote by default)
+- `--with-commit-link`: include a URL column with GitHub blob links (uses the `origin` remote by default)
+  - `--with-link` remains available as a deprecated alias for backward compatibility.
+  - Suppress the deprecated-alias warning by setting `TODOX_NO_DEPRECATION_WARNINGS=1` (handy for CI pipelines).
   - Override the remote name with `TODOX_LINK_REMOTE=<name>` when `origin` is not available (for example `upstream`).
   - Override the scheme with `TODOX_LINK_SCHEME=http` when your GitHub Enterprise appliance is served over plain HTTP.
   - Remote resolution failures do not abort the scan; URLs are left blank and a warning is recorded in `errors[]` / `error_count`.
   - Markdown files append `?plain=1#L<n>` to avoid GitHub anchor collisions with the rendered view.
+- `--with-pr-links`: attach pull requests that contain each commit.
+  - Combine with `--pr-state {all|open|closed|merged}` to filter by state, `--pr-limit N` (1–20, default 3) to cap the number of PRs per item, and `--pr-prefer {open|merged|closed|none}` to influence ordering when multiple states are present.
+  - Results populate `prs[]` per item and set `has_prs=true` in JSON/table metadata. Each entry exposes `{number,state,url}`.
+  - Authenticate with the GitHub CLI (`gh`) or export `GH_TOKEN` / `GITHUB_TOKEN` for REST access when scanning private repositories; anonymous requests can hit rate limits quickly.
+  - Tune the PR fetching worker pool with `TODOX_GH_JOBS=<n>` (1–32). The default uses the smaller of `jobs` and 32.
 - `--full`: shorthand for `--with-comment --with-message`
 
 ### Truncation controls
@@ -202,7 +216,7 @@ Both the CLI flags and the `/api/scan` query parameters share the same normaliza
 
 | Parameter | Accepted values | Validation |
 | --- | --- | --- |
-| Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `--with-link`, `with_link`, `ignore_ws`, etc.) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
+| Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `--with-commit-link`, `with_commit_link`, `--with-pr-links`, `with_pr_links`, `ignore_ws`, etc.; `--with-link` / `with_link` remain as deprecated aliases) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
 | `--type`, `type` | `todo`, `fixme`, `both` | Unknown values are rejected. |
 | `--mode`, `mode` | `last`, `first` | Unknown values are rejected. |
 | `--output` | `table`, `tsv`, `json` | Unknown values are rejected (CLI only). |

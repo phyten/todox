@@ -9,17 +9,25 @@ import (
 
 // Item は 1 件の TODO/FIXME を表す
 type Item struct {
-	Kind    string `json:"kind"` // TODO | FIXME | TODO|FIXME
-	Author  string `json:"author"`
-	Email   string `json:"email"`
-	Date    string `json:"date"`     // author date (iso-strict-local)
-	AgeDays int    `json:"age_days"` // author date からの経過日数
-	Commit  string `json:"commit"`   // full SHA
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Comment string `json:"comment,omitempty"` // TODO/FIXME からの行
-	Message string `json:"message,omitempty"` // commit subject (1行目)
-	URL     string `json:"url,omitempty"`     // コミット行への恒久リンク
+	Kind    string           `json:"kind"` // TODO | FIXME | TODO|FIXME
+	Author  string           `json:"author"`
+	Email   string           `json:"email"`
+	Date    string           `json:"date"`     // author date (iso-strict-local)
+	AgeDays int              `json:"age_days"` // author date からの経過日数
+	Commit  string           `json:"commit"`   // full SHA
+	File    string           `json:"file"`
+	Line    int              `json:"line"`
+	Comment string           `json:"comment,omitempty"` // TODO/FIXME からの行
+	Message string           `json:"message,omitempty"` // commit subject (1行目)
+	URL     string           `json:"url,omitempty"`     // コミット行への恒久リンク
+	PRs     []PullRequestRef `json:"prs,omitempty"`
+}
+
+// PullRequestRef はコミットに紐づく PR の参照情報を表す
+type PullRequestRef struct {
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	URL    string `json:"url"`
 }
 
 // ItemError は 1 行の取得に失敗した際の情報を表す
@@ -60,6 +68,7 @@ type Result struct {
 	HasMessage bool        `json:"has_message"`
 	HasAge     bool        `json:"has_age"`
 	HasURL     bool        `json:"has_url"`
+	HasPRs     bool        `json:"has_prs"`
 	Total      int         `json:"total"`
 	ElapsedMS  int64       `json:"elapsed_ms"`
 	Errors     []ItemError `json:"errors,omitempty"`
