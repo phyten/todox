@@ -1071,8 +1071,8 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 					continue
 				}
 				if prStage.err != nil {
-					obsCore.Close()
 					_ = writeSSE(w, flusher, "error", map[string]string{"message": prStage.err.Error()})
+					obsCore.Close()
 					return
 				}
 				if err := writeSSE(w, flusher, "result", currentRes); err != nil {
