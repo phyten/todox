@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/phyten/todox/internal/engine"
 	ghclient "github.com/phyten/todox/internal/host/github"
+	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
 )
@@ -505,6 +507,47 @@ func (r *countingRunner) Calls() int32 {
 	return atomic.LoadInt32(&r.gitConfigCalls)
 }
 
+type recordingObserver struct {
+	mu        sync.Mutex
+	snapshots []progress.Snapshot
+	last      progress.Snapshot
+	done      bool
+}
+
+func (o *recordingObserver) Publish(s progress.Snapshot) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.snapshots = append(o.snapshots, s)
+	o.last = s
+}
+
+func (o *recordingObserver) Done(s progress.Snapshot) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.last = s
+	o.done = true
+}
+
+func (o *recordingObserver) Snapshots() []progress.Snapshot {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make([]progress.Snapshot, len(o.snapshots))
+	copy(out, o.snapshots)
+	return out
+}
+
+func (o *recordingObserver) Last() progress.Snapshot {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.last
+}
+
+func (o *recordingObserver) DoneCalled() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.done
+}
+
 func TestApplyLinkColumnAddsURL(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "docs/readme.md", Line: 7}}}
 	sel := FieldSelection{NeedURL: true, ShowURL: true}
@@ -567,7 +610,7 @@ func TestApplyPRColumnsPopulatesPRs(t *testing.T) {
 	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
 	opts := prOptions{State: "all", Limit: 1, Prefer: "open", Jobs: 4}
 	var cache remoteInfoCache
-	if err := applyPRColumns(context.Background(), prRunner{}, ".", &cache, res, sel, opts); err != nil {
+	if err := applyPRColumns(context.Background(), prRunner{}, ".", &cache, res, sel, opts, nil); err != nil {
 		t.Fatalf("applyPRColumns failed: %v", err)
 	}
 	if !res.HasPRs {
@@ -594,7 +637,7 @@ func TestApplyPRColumnsRecordsErrors(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "cafebabecafebabecafebabecafebabecafebabe"}}}
 	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
 	var cache remoteInfoCache
-	if err := applyPRColumns(context.Background(), errorRunner{}, ".", &cache, res, sel, prOptions{State: "all", Limit: 3, Prefer: "open", Jobs: 2}); err != nil {
+	if err := applyPRColumns(context.Background(), errorRunner{}, ".", &cache, res, sel, prOptions{State: "all", Limit: 3, Prefer: "open", Jobs: 2}, nil); err != nil {
 		t.Fatalf("applyPRColumns should not return error: %v", err)
 	}
 	if !res.HasPRs {
@@ -608,6 +651,34 @@ func TestApplyPRColumnsRecordsErrors(t *testing.T) {
 	}
 	if res.ErrorCount != len(res.Errors) {
 		t.Fatalf("error count mismatch: %+v", res)
+	}
+}
+
+func TestApplyPRColumnsPublishesProgressSnapshots(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678"}, {Commit: "1234567890abcdef1234567890abcdef12345678"}}}
+	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	opts := prOptions{State: "all", Limit: 2, Prefer: "open", Jobs: 2}
+	var cache remoteInfoCache
+	obs := &recordingObserver{}
+	if err := applyPRColumns(context.Background(), prRunner{}, ".", &cache, res, sel, opts, obs); err != nil {
+		t.Fatalf("applyPRColumns failed: %v", err)
+	}
+	snaps := obs.Snapshots()
+	if len(snaps) == 0 {
+		t.Fatalf("expected at least one snapshot to be published")
+	}
+	if snaps[0].Stage != progress.StagePR {
+		t.Fatalf("initial snapshot should use PR stage, got %q", snaps[0].Stage)
+	}
+	final := obs.Last()
+	if final.Stage != progress.StagePR {
+		t.Fatalf("final snapshot stage mismatch: %q", final.Stage)
+	}
+	if final.Total == 0 || final.Done != final.Total {
+		t.Fatalf("final snapshot should be complete: %+v", final)
+	}
+	if !obs.DoneCalled() {
+		t.Fatalf("observer Done should be invoked")
 	}
 }
 
@@ -629,7 +700,7 @@ func TestRemoteDetectionSharedAcrossLinkAndPR(t *testing.T) {
 	if mid == 0 {
 		t.Fatalf("expected git remote detection to run at least once")
 	}
-	if err := applyPRColumns(ctx, runner, ".", &cache, res, sel, opts); err != nil {
+	if err := applyPRColumns(ctx, runner, ".", &cache, res, sel, opts, nil); err != nil {
 		t.Fatalf("applyPRColumns failed: %v", err)
 	}
 	after := runner.Calls()
