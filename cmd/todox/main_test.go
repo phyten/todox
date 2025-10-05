@@ -9,15 +9,33 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dop251/goja"
 
 	"github.com/phyten/todox/internal/engine"
+	ghclient "github.com/phyten/todox/internal/host/github"
 	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
 )
+
+var webTemplateHTML = mustReadWebTemplate()
+
+func mustReadWebTemplate() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("runtime.Caller failed")
+	}
+	path := filepath.Join(filepath.Dir(file), "..", "..", "internal", "web", "templates", "index.html")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(fmt.Sprintf("failed to load web template: %v", err))
+	}
+	return string(data)
+}
 
 func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	r, w, err := os.Pipe()
@@ -36,7 +54,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	sel, err := ResolveFields("", true, true, false, false)
+	sel, err := ResolveFields("", true, true, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -70,7 +88,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	sel, err := ResolveFields("", true, false, false, false)
+	sel, err := ResolveFields("", true, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -119,7 +137,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", true, false, false, false)
+	sel, err := ResolveFields("", true, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -162,7 +180,7 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true, false)
+	sel, err := ResolveFields("", false, false, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -203,7 +221,7 @@ func TestPrintTSVは常に非カラー(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false, false)
+	sel, err := ResolveFields("type,author", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -243,7 +261,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true, false)
+	sel, err := ResolveFields("", false, false, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -286,7 +304,7 @@ func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
 		},
 	}
 
-	sel, err := ResolveFields("type,author,location", false, false, false, false)
+	sel, err := ResolveFields("type,author,location", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -357,7 +375,7 @@ func TestPrintTableはカラーを有効化するとANSIコードを含む(t *te
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, false, false)
+	sel, err := ResolveFields("", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -396,7 +414,7 @@ func TestTableColorNeverDisablesANSI(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false, false)
+	sel, err := ResolveFields("type,author", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -445,10 +463,53 @@ func (errorRunner) Run(ctx context.Context, dir, name string, args ...string) ([
 	return nil, []byte("fatal: not a git repository"), fmt.Errorf("exit status 128")
 }
 
+type prRunner struct{}
+
+func (prRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error) {
+	if name == "git" && len(args) >= 3 && args[0] == "config" && args[1] == "--get" {
+		key := args[2]
+		switch key {
+		case "remote.origin.url":
+			return []byte("https://github.com/example/demo.git\n"), nil, nil
+		case "remote.upstream.url":
+			return []byte("ssh://git@github.example.com:2222/team/demo.git\n"), nil, nil
+		}
+	}
+	if name == "gh" && len(args) >= 2 && args[0] == "api" && strings.Contains(args[1], "/pulls") {
+		payload := `[{"number":10,"title":"Feature","state":"OPEN","html_url":"https://github.com/example/demo/pull/10"},{"number":4,"title":"Bugfix","state":"closed","html_url":"https://github.com/example/demo/pull/4","merged_at":"2024-01-02T03:04:05Z"}]`
+		return []byte(payload), nil, nil
+	}
+	return nil, nil, fmt.Errorf("unexpected command: %s %v", name, args)
+}
+
+type countingRunner struct {
+	gitConfigCalls int32
+}
+
+func (r *countingRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, []byte, error) {
+	if name == "git" && len(args) >= 3 && args[0] == "config" && args[1] == "--get" {
+		key := args[2]
+		if key == "remote.origin.url" || key == "remote.upstream.url" {
+			atomic.AddInt32(&r.gitConfigCalls, 1)
+			return []byte("https://github.com/example/demo.git\n"), nil, nil
+		}
+	}
+	if name == "gh" && len(args) >= 2 && args[0] == "api" && strings.Contains(args[1], "/pulls") {
+		payload := `[{"number":10,"title":"Feature","state":"OPEN","html_url":"https://github.com/example/demo/pull/10"}]`
+		return []byte(payload), nil, nil
+	}
+	return nil, nil, fmt.Errorf("unexpected command: %s %v", name, args)
+}
+
+func (r *countingRunner) Calls() int32 {
+	return atomic.LoadInt32(&r.gitConfigCalls)
+}
+
 func TestApplyLinkColumnAddsURL(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "docs/readme.md", Line: 7}}}
 	sel := FieldSelection{NeedURL: true, ShowURL: true}
-	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", res, sel); err != nil {
+	var cache remoteInfoCache
+	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", &cache, res, sel); err != nil {
 		t.Fatalf("applyLinkColumn failed: %v", err)
 	}
 	if !res.HasURL {
@@ -462,10 +523,26 @@ func TestApplyLinkColumnAddsURL(t *testing.T) {
 	}
 }
 
+func TestApplyLinkColumnSetsHasURLWhenHidden(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "main.go", Line: 42}}}
+	sel := FieldSelection{NeedURL: true, ShowURL: false}
+	var cache remoteInfoCache
+	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", &cache, res, sel); err != nil {
+		t.Fatalf("applyLinkColumn failed: %v", err)
+	}
+	if !res.HasURL {
+		t.Fatalf("HasURL should reflect NeedURL even when hidden: %+v", res)
+	}
+	if got := res.Items[0].URL; got == "" {
+		t.Fatalf("URL should be populated regardless of ShowURL: %+v", res.Items[0])
+	}
+}
+
 func TestApplyLinkColumnGracefullyHandlesErrors(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "deadbeef", File: "foo.go", Line: 12}}}
 	sel := FieldSelection{NeedURL: true, ShowURL: true}
-	if err := applyLinkColumn(context.Background(), errorRunner{}, ".", res, sel); err != nil {
+	var cache remoteInfoCache
+	if err := applyLinkColumn(context.Background(), errorRunner{}, ".", &cache, res, sel); err != nil {
 		t.Fatalf("applyLinkColumn should not fail: %v", err)
 	}
 	if !res.HasURL {
@@ -482,6 +559,111 @@ func TestApplyLinkColumnGracefullyHandlesErrors(t *testing.T) {
 	}
 	if res.ErrorCount != len(res.Errors) {
 		t.Fatalf("error count not updated: %+v", res)
+	}
+}
+
+func TestApplyPRColumnsPopulatesPRs(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678"}, {Commit: "1234567890abcdef1234567890abcdef12345678"}}}
+	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	opts := prOptions{State: "all", Limit: 1, Prefer: "open", Jobs: 4}
+	var cache remoteInfoCache
+	if err := applyPRColumns(context.Background(), prRunner{}, ".", &cache, res, sel, opts); err != nil {
+		t.Fatalf("applyPRColumns failed: %v", err)
+	}
+	if !res.HasPRs {
+		t.Fatalf("HasPRs should be true: %+v", res)
+	}
+	for idx, item := range res.Items {
+		if len(item.PRs) != 1 {
+			t.Fatalf("item %d PRs length mismatch: %+v", idx, item.PRs)
+		}
+		pr := item.PRs[0]
+		if pr.Number != 10 || pr.State != "open" {
+			t.Fatalf("unexpected PR data: %+v", pr)
+		}
+		if !strings.Contains(pr.URL, "/pull/10") {
+			t.Fatalf("unexpected PR URL: %s", pr.URL)
+		}
+	}
+	if res.ErrorCount != 0 || len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %+v", res.Errors)
+	}
+}
+
+func TestApplyPRColumnsRecordsErrors(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Commit: "cafebabecafebabecafebabecafebabecafebabe"}}}
+	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	var cache remoteInfoCache
+	if err := applyPRColumns(context.Background(), errorRunner{}, ".", &cache, res, sel, prOptions{State: "all", Limit: 3, Prefer: "open", Jobs: 2}); err != nil {
+		t.Fatalf("applyPRColumns should not return error: %v", err)
+	}
+	if !res.HasPRs {
+		t.Fatalf("HasPRs should remain true when PRs requested: %+v", res)
+	}
+	if len(res.Errors) == 0 {
+		t.Fatalf("expected PR error to be recorded")
+	}
+	if res.Errors[0].Stage != "pr" {
+		t.Fatalf("unexpected error stage: %+v", res.Errors[0])
+	}
+	if res.ErrorCount != len(res.Errors) {
+		t.Fatalf("error count mismatch: %+v", res)
+	}
+}
+
+func TestRemoteDetectionSharedAcrossLinkAndPR(t *testing.T) {
+	runner := &countingRunner{}
+	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "main.go", Line: 5}}}
+	sel := FieldSelection{NeedURL: true, ShowURL: true, NeedPRs: true, ShowPRs: true}
+	opts := prOptions{State: "all", Limit: 1, Prefer: "open", Jobs: 1}
+	var cache remoteInfoCache
+	ctx := context.Background()
+	before := runner.Calls()
+	if before != 0 {
+		t.Fatalf("unexpected initial call count: %d", before)
+	}
+	if err := applyLinkColumn(ctx, runner, ".", &cache, res, sel); err != nil {
+		t.Fatalf("applyLinkColumn failed: %v", err)
+	}
+	mid := runner.Calls()
+	if mid == 0 {
+		t.Fatalf("expected git remote detection to run at least once")
+	}
+	if err := applyPRColumns(ctx, runner, ".", &cache, res, sel, opts); err != nil {
+		t.Fatalf("applyPRColumns failed: %v", err)
+	}
+	after := runner.Calls()
+	if after != mid {
+		t.Fatalf("remote detection should be cached across link and PR: before=%d mid=%d after=%d", before, mid, after)
+	}
+}
+
+func TestFilterPRsByStateMerged(t *testing.T) {
+	prs := []ghclient.PRInfo{
+		{Number: 1, State: "open"},
+		{Number: 2, State: "merged"},
+		{Number: 3, State: "closed"},
+	}
+	filtered, err := filterPRsByState(prs, "merged", "--pr-state")
+	if err != nil {
+		t.Fatalf("filterPRsByState returned error: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Number != 2 {
+		t.Fatalf("expected only merged PR to remain: %+v", filtered)
+	}
+	if _, err := filterPRsByState(prs, "unknown", "--pr-state"); err == nil || !strings.Contains(err.Error(), "--pr-state") {
+		t.Fatalf("expected error mentioning --pr-state, got: %v", err)
+	}
+}
+
+func TestSortPRsByPreferenceNonePreservesOrder(t *testing.T) {
+	original := []ghclient.PRInfo{{Number: 5, State: "open"}, {Number: 2, State: "merged"}, {Number: 9, State: "closed"}}
+	prs := append([]ghclient.PRInfo(nil), original...)
+	sortPRsByPreference(prs, "none")
+	for i := range prs {
+		if prs[i].Number != original[i].Number || prs[i].State != original[i].State {
+			t.Fatalf("PR order changed when prefer=none: got=%+v want=%+v", prs, original)
+		}
 	}
 }
 
@@ -510,7 +692,7 @@ func TestApplySortは年齢順に並び替える(t *testing.T) {
 
 func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "render"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "render"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
@@ -535,6 +717,30 @@ func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	}
 	if !strings.Contains(yesHTML, "aria-label=\"GitHub で開く\"") {
 		t.Fatalf("アクセシブルラベルが不足しています: %s", yesHTML)
+	}
+}
+
+func TestWebRenderIncludesPRColumn(t *testing.T) {
+	rt := goja.New()
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "render"} {
+		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
+			t.Fatalf("failed to load %s: %v", fn, err)
+		}
+	}
+	script := `render({items:[{kind:"TODO",author:"Bob",email:"bob@example.com",date:"2024-01-02",file:"main.go",line:8,commit:"abcdef1234567890",prs:[{number:12,state:"open",url:"https://example.com/pull/12"}]}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:true});`
+	value, err := rt.RunString(script)
+	if err != nil {
+		t.Fatalf("render with PRs failed: %v", err)
+	}
+	html := value.String()
+	if !strings.Contains(html, "<th>PRS</th>") {
+		t.Fatalf("PRS header missing: %s", html)
+	}
+	if !strings.Contains(html, "href=\"https://example.com/pull/12\"") {
+		t.Fatalf("PR link missing: %s", html)
+	}
+	if !strings.Contains(html, "#12</a>(open)") {
+		t.Fatalf("PR summary missing: %s", html)
 	}
 }
 
@@ -577,16 +783,19 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 
 func extractJSFunction(t *testing.T, name string) string {
 	marker := "function " + name + "("
-	idx := strings.Index(webAppHTML, marker)
+	idx := strings.Index(webTemplateHTML, marker)
 	if idx < 0 {
 		t.Fatalf("function %s not found", name)
 	}
-	rest := webAppHTML[idx:]
-	end := strings.Index(rest, "\nfunction ")
-	if end == -1 {
-		end = strings.Index(rest, "\n</script>")
+	rest := webTemplateHTML[idx:]
+	end := len(rest)
+	candidates := []string{"\n  function ", "\nfunction ", "\n  </script>", "\n</script>"}
+	for _, c := range candidates {
+		if next := strings.Index(rest, c); next >= 0 && next < end {
+			end = next
+		}
 	}
-	if end == -1 {
+	if end == len(rest) {
 		t.Fatalf("could not determine end of function %s", name)
 	}
 	return rest[:end]

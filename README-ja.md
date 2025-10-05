@@ -146,9 +146,16 @@ todox --with-age --color always | less -R
 ![色付きテーブルの例](docs/color-table.png)
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
-> `--with-link` を有効にした場合は各 item に `url`、Result に `has_url` が追加されます。これらは公開 API の一部であり将来も保持されます。
+> `--with-commit-link` を有効にすると各 item に `url`、Result に `has_url` が追加されます。`--with-pr-links` を有効にすると各 item に `prs[]`、Result に `has_prs` が追加されます。これらは公開 API の一部であり将来も保持されます。
+> `has_url` / `has_prs` は「データ取得済みか」の指標です（`--with-*` や `--fields` により内部取得されます）。列を非表示にしていてもメタ情報としては true になります。
 
 `--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。
+
+`--fields` で指定できる列（table / TSV）:
+- `type`, `author`, `email`, `date`, `age`, `commit`, `location`（`file:line`）
+- `comment`, `message`
+- `url`（エイリアス: `commit_url`）
+- `pr`, `prs`, `pr_urls`
 
 ### 追加列（非表示が既定）
 
@@ -156,11 +163,18 @@ todox --with-age --color always | less -R
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
 - `--with-age` : table / TSV に AGE（日数）列を追加
-- `--with-link` : URL 列を追加（GitHub 上の該当行リンク。既定では `origin` リモートを参照）
+- `--with-commit-link` : URL 列を追加（GitHub 上の該当行リンク。既定では `origin` リモートを参照）
+  - `--with-link` は後方互換のための非推奨エイリアスとして残しています。
+  - CI 等で非推奨警告を抑止したい場合は `TODOX_NO_DEPRECATION_WARNINGS=1` を設定してください。
   - `origin` 以外を使う場合は `TODOX_LINK_REMOTE=<リモート名>` を設定してください（例: `upstream`）。
   - 社内 GHES など HTTP 配信のみの環境では `TODOX_LINK_SCHEME=http` を指定するとリンク生成に HTTP を使います。
   - リモート解析に失敗してもスキャン自体は成功し、URL 列は空欄・警告は `errors[]` / `error_count` に記録されます。
   - Markdown ファイルでは `?plain=1#L<n>` を付与し、GitHub のレンダリングビューとアンカー競合しないようにしています。
+- `--with-pr-links` : コミットを含む PR 情報を追加
+  - `--pr-state {all|open|closed|merged}` で状態フィルタ、`--pr-limit N`（1〜20、既定 3）で件数上限、`--pr-prefer {open|merged|closed|none}` で状態の優先順位を調整できます。
+  - 有効化すると各 item に `{number,state,url}` の配列 `prs[]` が追加され、Result には `has_prs` が立ちます。
+  - プライベートリポジトリでは gh CLI の認証、または `GH_TOKEN` / `GITHUB_TOKEN` を環境変数に設定して REST API を利用してください。匿名リクエストはレートリミットに達しやすい点に注意してください。
+  - PR 取得の並列度は `TODOX_GH_JOBS=<n>`（1〜32）で調整できます。既定では `jobs` の値と上限 32 の小さい方が採用されます。
 - `--full` : `--with-comment --with-message` のショートカット
 
 ### 表示幅制御
@@ -203,7 +217,7 @@ CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レ
 
 | パラメータ | 受理する値 | 検証内容 |
 | --- | --- | --- |
-| 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`--with-link`、`with_link`、`ignore_ws` など） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
+| 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`--with-commit-link`、`with_commit_link`、`--with-pr-links`、`with_pr_links`、`ignore_ws` など。`--with-link` / `with_link` は非推奨エイリアス） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
 | `--type`, `type` | `todo` / `fixme` / `both` | 未知の値はエラーになります。 |
 | `--mode`, `mode` | `last` / `first` | 未知の値はエラーになります。 |
 | `--output` | `table` / `tsv` / `json` | 未知の値はエラーになります（CLI のみ）。 |
