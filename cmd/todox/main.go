@@ -1291,6 +1291,7 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 				obs.Publish(snap)
 				obs.Done(snap)
 			}
+			res.ErrorCount = len(res.Errors)
 			return nil
 		case result, ok := <-results:
 			if !ok {
