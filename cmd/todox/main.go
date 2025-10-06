@@ -411,8 +411,13 @@ func scanCmd(args []string) {
 
 	var obs progress.Observer
 	if cfg.opts.Progress {
-		obs = progress.NewAutoObserver(os.Stderr)
-		cfg.opts.ProgressObserver = obs
+		baseObs := progress.NewAutoObserver(os.Stderr)
+		obs = baseObs
+		if fieldSel.NeedPRs {
+			cfg.opts.ProgressObserver = suppressDoneObserver{base: baseObs}
+		} else {
+			cfg.opts.ProgressObserver = baseObs
+		}
 		cfg.opts.Progress = false
 	} else {
 		obs = cfg.opts.ProgressObserver
@@ -870,6 +875,19 @@ func (o suppressCloseObserver) Done(s progress.Snapshot) {
 	}
 	o.base.Publish(s)
 }
+
+type suppressDoneObserver struct {
+	base progress.Observer
+}
+
+func (o suppressDoneObserver) Publish(s progress.Snapshot) {
+	if o.base == nil {
+		return
+	}
+	o.base.Publish(s)
+}
+
+func (suppressDoneObserver) Done(progress.Snapshot) {}
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
 	data, err := json.Marshal(payload)
