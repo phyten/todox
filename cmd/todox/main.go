@@ -1209,20 +1209,21 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 		}
 		commitToIndexes[sha] = append(commitToIndexes[sha], idx)
 	}
-	var estimator *progress.Estimator
+
+	// (1) PR 進捗推定器を先に初期化しておき、初期スナップショットを Publish する
+	var prEstimator *progress.Estimator
 	if obs != nil {
-		estimator = progress.NewEstimator(len(commits), progress.Config{})
-		if snap, changed := estimator.Stage(progress.StagePR); changed {
+		prEstimator = progress.NewEstimator(len(commits), progress.Config{})
+		if snap, changed := prEstimator.Stage(progress.StagePR); changed {
 			obs.Publish(snap)
 		}
 	}
+	// (2) コミット 0 件なら Complete→Publish→Done を送って終了
 	if len(commits) == 0 {
-		if estimator != nil {
-			finalSnap := estimator.Complete()
-			if obs != nil {
-				obs.Publish(finalSnap)
-				obs.Done(finalSnap)
-			}
+		if prEstimator != nil {
+			finalSnap := prEstimator.Complete()
+			obs.Publish(finalSnap)
+			obs.Done(finalSnap)
 		}
 		return nil
 	}
@@ -1231,8 +1232,9 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 	if err != nil {
 		msg := "failed to determine git remote: " + err.Error()
 		recordPRStageError(res, msg)
-		if estimator != nil && obs != nil {
-			finalSnap := estimator.Complete()
+		// (3) リモート解決が失敗した場合も Complete→Publish→Done を送って終端させる
+		if prEstimator != nil {
+			finalSnap := prEstimator.Complete()
 			obs.Publish(finalSnap)
 			obs.Done(finalSnap)
 		}
@@ -1283,15 +1285,18 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 	for {
 		select {
 		case <-ctx.Done():
-			if estimator != nil && obs != nil {
-				snap, _ := estimator.Stage(progress.StagePR)
+			// (4) キャンセル時も Publish→Done を送って Stage=pr が閉じるようにする
+			if prEstimator != nil {
+				snap, _ := prEstimator.Stage(progress.StagePR)
+				obs.Publish(snap)
 				obs.Done(snap)
 			}
 			return nil
 		case result, ok := <-results:
 			if !ok {
-				if estimator != nil && obs != nil {
-					finalSnap := estimator.Complete()
+				// (5) 終了時は Complete→Publish→Done を明示的に送る
+				if prEstimator != nil {
+					finalSnap := prEstimator.Complete()
 					obs.Publish(finalSnap)
 					obs.Done(finalSnap)
 				}
@@ -1321,8 +1326,8 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 			for _, idx := range commitToIndexes[result.commit] {
 				res.Items[idx].PRs = append([]engine.PullRequestRef(nil), refs...)
 			}
-			if estimator != nil && obs != nil {
-				if snap, notify := estimator.Advance(1); notify {
+			if prEstimator != nil {
+				if snap, notify := prEstimator.Advance(1); notify {
 					obs.Publish(snap)
 				}
 			}
