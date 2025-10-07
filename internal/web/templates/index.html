@@ -58,108 +58,70 @@
     <button type="submit">Scan</button>
   </form>
   <p class="small">Tip: Same params as CLI. Example: <code>/api/scan?type=todo&amp;mode=first&amp;with_comment=1</code></p>
+  <div id="progress" class="progress-wrap" aria-live="polite" hidden>
+    <div class="progress-header">
+      <strong id="progress-stage">scan</strong>
+      <span id="progress-stats" class="muted"></span>
+      <button type="button" id="progress-cancel" class="linklike">キャンセル</button>
+    </div>
+
+    <ol class="stepper" aria-label="Stages">
+      <li id="st-scan" class="current">scan</li>
+      <li id="st-attr">attr</li>
+      <li id="st-pr">pr</li>
+    </ol>
+
+    <div id="progressbar" class="progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Stage progress">
+      <div id="progressbar-inner" style="width:0%"></div>
+    </div>
+
+    <div class="progress-footer muted">
+      <span id="progress-eta">ETA: —</span>
+      <span id="progress-rate">Rate: —</span>
+      <span id="progress-elapsed">Elapsed: —</span>
+    </div>
+  </div>
   <div id="out"></div>
   <script>
-  const f=document.getElementById('f'),out=document.getElementById('out');
+  const f=document.getElementById('f');
+  const out=document.getElementById('out');
   const banner=document.getElementById('error-banner');
   const bannerMsg=document.getElementById('error-message');
   const bannerClose=document.getElementById('error-close');
+  const prog=document.getElementById('progress');
+  const progInner=document.getElementById('progressbar-inner');
+  const progBar=document.getElementById('progressbar');
+  const progStage=document.getElementById('progress-stage');
+  const progStats=document.getElementById('progress-stats');
+  const progETA=document.getElementById('progress-eta');
+  const progRate=document.getElementById('progress-rate');
+  const progElapsed=document.getElementById('progress-elapsed');
+  const btnCancel=document.getElementById('progress-cancel');
+  const stScan=document.getElementById('st-scan');
+  const stAttr=document.getElementById('st-attr');
+  const stPr=document.getElementById('st-pr');
+
+  let es=null;
+  let lastSnap=null;
+  let rafId=0;
+
   function showError(msg){
     bannerMsg.textContent=msg;
     banner.style.display='flex';
   }
+
   function hideError(){
     banner.style.display='none';
     bannerMsg.textContent='';
   }
-  bannerClose.addEventListener('click',(e)=>{
-    e.preventDefault();
-    hideError();
-  });
-  f.onsubmit=async(e)=>{
-    e.preventDefault();
-    hideError();
-    try{
-      const fd=new FormData(f);
-      const q=new URLSearchParams(fd);
-      {
-        const el=f.elements.namedItem('ignore_ws');
-        if(el instanceof HTMLInputElement){
-          if(el.checked){
-            q.delete('ignore_ws');
-          }else{
-            q.set('ignore_ws','0');
-          }
-        }
-      }
-      for(const key of ['path','exclude','path_regex']){
-        const values=q.getAll(key);
-        q.delete(key);
-        const cleaned=[];
-        for(const value of values){
-          if(value==null){continue;}
-          for(const piece of String(value).split(',')){
-            const trimmed=piece.trim();
-            if(trimmed){cleaned.push(trimmed);}
-          }
-        }
-        for(const entry of cleaned){
-          q.append(key,entry);
-        }
-      }
-      {
-        const el=f.elements.namedItem('exclude_typical');
-        if(el instanceof HTMLInputElement){
-          if(el.checked){
-            q.set('exclude_typical','1');
-          }else{
-            q.delete('exclude_typical');
-          }
-        }
-      }
-      {
-        const el=f.elements.namedItem('jobs');
-        if(el instanceof HTMLInputElement){
-          if((el.value||'').trim()===''){
-            q.delete('jobs');
-          }
-        }
-      }
-      const res=await fetch('/api/scan?'+q.toString());
-      const raw=await res.text();
-      if(!res.ok){
-        let msg='HTTP '+res.status;
-        if(res.statusText){
-          msg+=' '+res.statusText;
-        }
-        const trimmed=raw.trim();
-        if(trimmed){
-          msg+=': '+trimmed;
-        }
-        throw new Error(msg);
-      }
-      let data=null;
-      const trimmed=raw.trim();
-      if(trimmed!==''){
-        try{
-          data=JSON.parse(trimmed);
-        }catch(parseErr){
-          const detail=parseErr instanceof Error?parseErr.message:String(parseErr);
-          throw new Error('Failed to parse response JSON: '+detail);
-        }
-      }
-      out.innerHTML=render(data);
-    }catch(err){
-      console.error(err);
-      showError(err instanceof Error?err.message:String(err));
-    }
-  };
+
   function escText(value){
     return String(value||'')
       .replace(/&/g,'&amp;')
       .replace(/</g,'&lt;')
       .replace(/>/g,'&gt;');
   }
+
   function escAttr(value){
     return String(value||'')
       .replace(/&/g,'&amp;')
@@ -168,6 +130,7 @@
       .replace(/"/g,'&quot;')
       .replace(/'/g,'&#39;');
   }
+
   function renderBadge(kind){
     const raw=String(kind||'');
     if(!raw){
@@ -180,7 +143,8 @@
     }
     return '<span class="badge" data-type="'+dataType+'">'+escText(upper)+'</span>';
   }
-  function render(data){
+
+  function renderResultTable(data){
     if(!data || typeof data!=='object'){
       return '<p>No results.</p>';
     }
@@ -282,6 +246,259 @@
     parts.push(h);
     return parts.join('');
   }
+
+  function resetProgressUI(){
+    progStage.textContent='scan';
+    progStats.textContent='0/— done';
+    progETA.textContent='ETA: —';
+    progRate.textContent='Rate: —';
+    progElapsed.textContent='Elapsed: —';
+    updateProgressBar(0);
+    setStepper('scan');
+  }
+
+  function showProgressUI(){
+    prog.hidden=false;
+    resetProgressUI();
+  }
+
+  function hideProgressUI(){
+    prog.hidden=true;
+    lastSnap=null;
+    if(rafId && typeof cancelAnimationFrame==='function'){
+      cancelAnimationFrame(rafId);
+      rafId=0;
+    }
+    btnCancel.onclick=null;
+  }
+
+  function setStepper(stage){
+    const stages={scan:stScan,attr:stAttr,pr:stPr};
+    for(const key of Object.keys(stages)){
+      const el=stages[key];
+      if(!el){continue;}
+      el.classList.remove('current');
+      el.classList.remove('done');
+    }
+    if(stage==='scan'){
+      stScan.classList.add('current');
+    }else if(stage==='attr'){
+      stScan.classList.add('done');
+      stAttr.classList.add('current');
+    }else if(stage==='pr'){
+      stScan.classList.add('done');
+      stAttr.classList.add('done');
+      stPr.classList.add('current');
+    }
+  }
+
+  function updateProgressBar(percent){
+    const pct=Math.max(0,Math.min(100,percent||0));
+    progInner.style.width=pct+'%';
+    if(progBar){
+      progBar.setAttribute('aria-valuenow',String(Math.round(pct)));
+    }
+  }
+
+  function renderProgressOnce(){
+    rafId=0;
+    if(!lastSnap){
+      return;
+    }
+    const s=lastSnap;
+    progStage.textContent=s.stage||'';
+    setStepper(s.stage);
+    let percent=0;
+    if(s.total && s.total>0){
+      percent=(s.done/s.total)*100;
+    }
+    updateProgressBar(percent);
+    const totalLabel=s.total&&s.total>0?String(s.total):'—';
+    const statText=String(s.done||0)+'/'+totalLabel+' done';
+    const rateLabel=typeof s.rate_per_sec==='number'&&isFinite(s.rate_per_sec)?s.rate_per_sec.toFixed(1)+'/sec':'—';
+    const etaLabel=typeof s.eta_sec_p50==='number'&&isFinite(s.eta_sec_p50)?s.eta_sec_p50.toFixed(1)+'s':'—';
+    const elapsedLabel=typeof s.elapsed_sec==='number'&&isFinite(s.elapsed_sec)?s.elapsed_sec.toFixed(1)+'s':'—';
+    progStats.textContent=statText;
+    progRate.textContent='Rate: '+rateLabel;
+    progETA.textContent='ETA: '+etaLabel;
+    progElapsed.textContent='Elapsed: '+elapsedLabel;
+  }
+
+  function scheduleRender(){
+    if(typeof requestAnimationFrame!=='function'){
+      renderProgressOnce();
+      return;
+    }
+    if(rafId){
+      return;
+    }
+    rafId=requestAnimationFrame(renderProgressOnce);
+  }
+
+  function closeStream(){
+    if(es){
+      try{es.close();}catch(_){ }
+      es=null;
+    }
+  }
+
+  async function startScanWithFetch(q){
+    hideProgressUI();
+    out.innerHTML='';
+    try{
+      const res=await fetch('/api/scan?'+q.toString());
+      const raw=await res.text();
+      if(!res.ok){
+        let msg='HTTP '+res.status;
+        if(res.statusText){
+          msg+=' '+res.statusText;
+        }
+        const trimmed=raw.trim();
+        if(trimmed){
+          msg+=': '+trimmed;
+        }
+        throw new Error(msg);
+      }
+      let data=null;
+      const trimmed=raw.trim();
+      if(trimmed!==''){
+        try{
+          data=JSON.parse(trimmed);
+        }catch(parseErr){
+          const detail=parseErr instanceof Error?parseErr.message:String(parseErr);
+          throw new Error('Failed to parse response JSON: '+detail);
+        }
+      }
+      out.innerHTML=renderResultTable(data);
+    }catch(err){
+      console.error(err);
+      showError(err instanceof Error?err.message:String(err));
+    }
+  }
+
+  function startScanWithSSE(q){
+    closeStream();
+    out.innerHTML='';
+    showProgressUI();
+    try{
+      es=new EventSource('/api/scan/stream?'+q.toString());
+    }catch(err){
+      hideProgressUI();
+      showError(err instanceof Error?err.message:String(err));
+      return;
+    }
+
+    es.addEventListener('progress',(ev)=>{
+      try{
+        lastSnap=JSON.parse(ev.data);
+        scheduleRender();
+      }catch(parseErr){
+        console.warn('progress parse failed',parseErr);
+      }
+    });
+
+    es.addEventListener('result',(ev)=>{
+      try{
+        const res=JSON.parse(ev.data);
+        hideProgressUI();
+        out.innerHTML=renderResultTable(res);
+      }catch(parseErr){
+        console.error(parseErr);
+        showError(parseErr instanceof Error?parseErr.message:String(parseErr));
+      }finally{
+        closeStream();
+      }
+    });
+
+    es.addEventListener('error',(ev)=>{
+      if(!ev || typeof ev.data==='undefined'){
+        return;
+      }
+      try{
+        const payload=JSON.parse(ev.data||'{}');
+        showError(payload&&payload.message?payload.message:'stream error');
+      }catch(parseErr){
+        showError(parseErr instanceof Error?parseErr.message:String(parseErr));
+      }
+      hideProgressUI();
+      closeStream();
+    });
+
+    es.onerror=(ev)=>{
+      if(ev && typeof ev.data!=='undefined'){
+        return;
+      }
+      progStats.textContent='reconnecting…';
+    };
+
+    btnCancel.onclick=()=>{
+      closeStream();
+      hideProgressUI();
+    };
+  }
+
+  function buildQueryParams(){
+    const fd=new FormData(f);
+    const q=new URLSearchParams(fd);
+    const ignoreEl=f.elements.namedItem('ignore_ws');
+    if(ignoreEl instanceof HTMLInputElement){
+      if(ignoreEl.checked){
+        q.delete('ignore_ws');
+      }else{
+        q.set('ignore_ws','0');
+      }
+    }
+    for(const key of ['path','exclude','path_regex']){
+      const values=q.getAll(key);
+      q.delete(key);
+      const cleaned=[];
+      for(const value of values){
+        if(value==null){
+          continue;
+        }
+        for(const piece of String(value).split(',')){
+          const trimmed=piece.trim();
+          if(trimmed){
+            cleaned.push(trimmed);
+          }
+        }
+      }
+      for(const entry of cleaned){
+        q.append(key,entry);
+      }
+    }
+    const excludeTypical=f.elements.namedItem('exclude_typical');
+    if(excludeTypical instanceof HTMLInputElement){
+      if(excludeTypical.checked){
+        q.set('exclude_typical','1');
+      }else{
+        q.delete('exclude_typical');
+      }
+    }
+    const jobsEl=f.elements.namedItem('jobs');
+    if(jobsEl instanceof HTMLInputElement){
+      if((jobsEl.value||'').trim()===''){
+        q.delete('jobs');
+      }
+    }
+    return q;
+  }
+
+  bannerClose.addEventListener('click',(e)=>{
+    e.preventDefault();
+    hideError();
+  });
+
+  f.addEventListener('submit',(e)=>{
+    e.preventDefault();
+    hideError();
+    const q=buildQueryParams();
+    if('EventSource' in window){
+      startScanWithSSE(q);
+    }else{
+      startScanWithFetch(q);
+    }
+  });
   </script>
 </body>
 </html>

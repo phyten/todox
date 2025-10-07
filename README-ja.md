@@ -77,6 +77,8 @@ make build
 
 Web フォームはサーバー既定に合わせています。`ignore whitespace` チェックは最初から ON（= `ignore_ws=true`）で、`jobs` 欄は空欄（自動）。`path` / `exclude` / `path_regex` の各テキスト欄は空のままなら送信されず、`exclude typical dirs` チェックを ON にしたときだけ `exclude_typical=1` を送信します。既定のままならクエリに含めません。
 
+SSE (`EventSource`) に対応したブラウザでは `/api/scan/stream` に接続し、`scan → attr → pr` のステージ進捗・処理速度・ETA をリアルタイムに表示します。キャンセルリンクはストリームを `close()` するだけなので、サーバー側のスキャンも即座に中断されます。SSE に対応していないブラウザでは自動的に従来どおりの `fetch(/api/scan)` にフォールバックします。
+
 ---
 
 埋め込み CSS は OS の `prefers-color-scheme` を参照してライト/ダークに追従し、TODO/FIXME バッジは WCAG AA を満たす前景/背景の組み合わせで表示されます。
