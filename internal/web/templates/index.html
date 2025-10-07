@@ -254,7 +254,7 @@
     progETA.textContent='ETA: —';
     progRate.textContent='Rate: —';
     progElapsed.textContent='Elapsed: —';
-    updateProgressBar(0);
+    updateProgressBar(0,false);
     setStepper('scan');
   }
 
@@ -298,11 +298,17 @@
     stPr.style.display = enabled ? '' : 'none';
   }
 
-  function updateProgressBar(percent){
+  function updateProgressBar(percent,determinate){
     const pct=Math.max(0,Math.min(100,percent||0));
     progInner.style.width=pct+'%';
     if(progBar){
-      progBar.setAttribute('aria-valuenow',String(Math.round(pct)));
+      if(determinate){
+        progBar.setAttribute('aria-valuenow',String(Math.round(pct)));
+        progBar.removeAttribute('aria-valuetext');
+      }else{
+        progBar.removeAttribute('aria-valuenow');
+        progBar.setAttribute('aria-valuetext','in progress');
+      }
     }
   }
 
@@ -315,12 +321,13 @@
     const nf = (typeof Intl!=='undefined'&&Intl.NumberFormat)?new Intl.NumberFormat():{format:(v)=>String(v)};
     progStage.textContent=s.stage||'';
     setStepper(s.stage);
+    const determinate=!!(s.total&&s.total>0);
     let percent=0;
-    if(s.total && s.total>0){
+    if(determinate){
       percent=(s.done/s.total)*100;
     }
-    updateProgressBar(percent);
-    const totalLabel=s.total&&s.total>0?nf.format(s.total):'—';
+    updateProgressBar(percent,determinate);
+    const totalLabel=determinate?nf.format(s.total):'—';
     const statText=nf.format(s.done||0)+'/'+totalLabel+' done';
     const rateLabel=typeof s.rate_per_sec==='number'&&isFinite(s.rate_per_sec)?nf.format(Number(s.rate_per_sec.toFixed(1)))+'/sec':'—';
     function fmtEta(sec){
@@ -452,7 +459,11 @@
       if(ev && typeof ev.data!=='undefined'){
         return;
       }
-      progStats.textContent='reconnecting…';
+      if(!es){
+        return;
+      }
+      const label=(lastSnap&&es.readyState===EventSource.CONNECTING)?'reconnecting…':'connecting…';
+      progStats.textContent=label;
     };
 
     btnCancel.onclick=()=>{
