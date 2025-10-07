@@ -1124,25 +1124,32 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 				_ = applyLinkColumn(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel)
 
 				currentRes = res
-				prChan := make(chan prStageResult, 1)
-				if inputs.FieldSel.NeedPRs {
-					go func(res *engine.Result) {
-						start := time.Now()
-						err := applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
-							State:  inputs.PRState,
-							Limit:  inputs.PRLimit,
-							Prefer: inputs.PRPrefer,
-							Jobs:   inputs.Options.Jobs,
-						}, obsCore)
-						elapsed := time.Since(start)
-						res.ElapsedMS += elapsed.Milliseconds()
-						prChan <- prStageResult{elapsed: elapsed, err: err, hadPRs: true}
-						close(prChan)
-					}(res)
-				} else {
-					prChan <- prStageResult{hadPRs: false}
-					close(prChan)
+				if !inputs.FieldSel.NeedPRs {
+					if err := writeSSE(w, flusher, "result", currentRes); err != nil {
+						obsCore.Close()
+						return
+					}
+					obsCore.Close()
+					resCh = nil
+					errCh = nil
+					stopThrottle()
+					continue
 				}
+
+				prChan := make(chan prStageResult, 1)
+				go func(res *engine.Result) {
+					start := time.Now()
+					err := applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
+						State:  inputs.PRState,
+						Limit:  inputs.PRLimit,
+						Prefer: inputs.PRPrefer,
+						Jobs:   inputs.Options.Jobs,
+					}, obsCore)
+					elapsed := time.Since(start)
+					res.ElapsedMS += elapsed.Milliseconds()
+					prChan <- prStageResult{elapsed: elapsed, err: err, hadPRs: true}
+					close(prChan)
+				}(res)
 				prDoneCh = prChan
 				resCh = nil
 			case prStage, ok := <-prDoneCh:
