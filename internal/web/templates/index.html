@@ -312,6 +312,7 @@
       return;
     }
     const s=lastSnap;
+    const nf = (typeof Intl!=='undefined'&&Intl.NumberFormat)?new Intl.NumberFormat():{format:(v)=>String(v)};
     progStage.textContent=s.stage||'';
     setStepper(s.stage);
     let percent=0;
@@ -319,10 +320,16 @@
       percent=(s.done/s.total)*100;
     }
     updateProgressBar(percent);
-    const totalLabel=s.total&&s.total>0?String(s.total):'—';
-    const statText=String(s.done||0)+'/'+totalLabel+' done';
-    const rateLabel=typeof s.rate_per_sec==='number'&&isFinite(s.rate_per_sec)?s.rate_per_sec.toFixed(1)+'/sec':'—';
-    const etaLabel=typeof s.eta_sec_p50==='number'&&isFinite(s.eta_sec_p50)?s.eta_sec_p50.toFixed(1)+'s':'—';
+    const totalLabel=s.total&&s.total>0?nf.format(s.total):'—';
+    const statText=nf.format(s.done||0)+'/'+totalLabel+' done';
+    const rateLabel=typeof s.rate_per_sec==='number'&&isFinite(s.rate_per_sec)?nf.format(Number(s.rate_per_sec.toFixed(1)))+'/sec':'—';
+    function fmtEta(sec){
+      if(!(typeof sec==='number'&&isFinite(sec))){return '—';}
+      const mm=Math.floor(sec/60);
+      const ss=Math.round(sec%60);
+      return nf.format(Number(sec.toFixed(1)))+'s ('+mm+':'+String(ss).padStart(2,'0')+')';
+    }
+    const etaLabel=fmtEta(s.eta_sec_p50);
     const elapsedLabel=typeof s.elapsed_sec==='number'&&isFinite(s.elapsed_sec)?s.elapsed_sec.toFixed(1)+'s':'—';
     progStats.textContent=statText;
     progRate.textContent='Rate: '+rateLabel;
