@@ -76,7 +76,7 @@ make build
 
 The web form mirrors the server defaults: *ignore whitespace* starts checked (matching `ignore_ws=true`) and the *jobs* field is blank (auto). The `path`, `exclude`, and `path_regex` inputs are sent only when non-empty, and the *exclude typical dirs* checkbox emits `exclude_typical=1` when checked. Leaving everything untouched keeps the API behaviour unchanged.
 
-Modern browsers open an `EventSource` to `/api/scan/stream`, showing live stage progress (`scan → attr → pr`), throughput, ETA, and a cancel link that simply closes the stream (which cancels the server-side scan). Browsers without SSE support automatically fall back to a single `fetch(/api/scan)` request, preserving the previous behaviour.
+Modern browsers open an `EventSource` to `/api/scan/stream`, showing live stage progress (`scan → attr → pr`), throughput, ETA, and a cancel link that simply closes the stream (which cancels the server-side scan). Browsers without SSE support automatically fall back to a single `fetch(/api/scan)` request, preserving the previous behaviour. The cancel link also aborts the fallback request via `AbortController`. When `with_pr_links=0`, the `pr` step is hidden from the UI. During transient network issues the UI shows a small "reconnecting…" message while the browser auto-reconnects (3s).
 
 ---
 
