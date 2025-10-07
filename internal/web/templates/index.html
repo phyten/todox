@@ -293,6 +293,11 @@
     }
   }
 
+  function togglePRStepVisibility(enabled){
+    if(!stPr){return;}
+    stPr.style.display = enabled ? '' : 'none';
+  }
+
   function updateProgressBar(percent){
     const pct=Math.max(0,Math.min(100,percent||0));
     progInner.style.width=pct+'%';
@@ -503,10 +508,26 @@
     hideError();
   });
 
+  // PR ステップの動的表示（初期化）
+  (function(){
+    const prCheck=f.elements.namedItem('with_pr_links');
+    if(prCheck instanceof HTMLInputElement){
+      togglePRStepVisibility(prCheck.checked);
+      prCheck.addEventListener('change',()=>togglePRStepVisibility(prCheck.checked));
+    }
+  })();
+
   f.addEventListener('submit',(e)=>{
     e.preventDefault();
     hideError();
     const q=buildQueryParams();
+    // 送信直前にも反映
+    {
+      const prCheck=f.elements.namedItem('with_pr_links');
+      if(prCheck instanceof HTMLInputElement){
+        togglePRStepVisibility(prCheck.checked);
+      }
+    }
     if('EventSource' in window){
       startScanWithSSE(q);
     }else{
