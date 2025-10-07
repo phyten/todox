@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,17 +17,7 @@ import (
 )
 
 func TestAPIScanStreamHandlerEmitsProgressAndResult(t *testing.T) {
-	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.name", "Tester")
-	runGit(t, repoDir, "config", "user.email", "tester@example.com")
-
-	source := "package main\n\nfunc main() {\n  // TODO: stream check\n}\n"
-	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(source), 0o644); err != nil {
-		t.Fatalf("failed to write file: %v", err)
-	}
-	runGit(t, repoDir, "add", ".")
-	runGit(t, repoDir, "commit", "-m", "initial commit")
+	repoDir := prepareStreamRepo(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/scan/stream", apiScanStreamHandler(repoDir))
@@ -45,7 +36,9 @@ func TestAPIScanStreamHandlerEmitsProgressAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to call stream endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status: got=%d want=%d", resp.StatusCode, http.StatusOK)
@@ -147,3 +140,94 @@ func TestAPIScanStreamHandlerEmitsProgressAndResult(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIScanStreamHandlerStopsOnClientClose(t *testing.T) {
+	repoDir := prepareStreamRepo(t)
+	handler := apiScanStreamHandler(repoDir)
+
+	pr, pw := io.Pipe()
+	recorder := newSSERecorder(pw)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/scan/stream?with_pr_links=0", nil).WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		handler(recorder, req)
+		close(done)
+	}()
+
+	reader := bufio.NewReader(pr)
+	sawProgress := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("failed to read stream: %v", err)
+		}
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
+			if sawProgress {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, ":") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "event:") && strings.TrimSpace(trimmed[6:]) == "progress" {
+			sawProgress = true
+		}
+	}
+	if !sawProgress {
+		t.Fatalf("progress event not observed before cancellation")
+	}
+
+	cancel()
+	_ = pr.Close()
+	_ = pw.CloseWithError(io.ErrClosedPipe)
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("handler did not exit after client close")
+	}
+}
+
+func prepareStreamRepo(t *testing.T) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.name", "Tester")
+	runGit(t, repoDir, "config", "user.email", "tester@example.com")
+
+	source := "package main\n\nfunc main() {\n  // TODO: stream check\n}\n"
+	if err := os.WriteFile(filepath.Join(repoDir, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "initial commit")
+	return repoDir
+}
+
+type sseResponseRecorder struct {
+	header http.Header
+	writer io.Writer
+	status int
+}
+
+func newSSERecorder(w io.Writer) *sseResponseRecorder {
+	return &sseResponseRecorder{
+		header: make(http.Header),
+		writer: w,
+		status: http.StatusOK,
+	}
+}
+
+func (r *sseResponseRecorder) Header() http.Header { return r.header }
+
+func (r *sseResponseRecorder) WriteHeader(status int) { r.status = status }
+
+func (r *sseResponseRecorder) Write(p []byte) (int, error) { return r.writer.Write(p) }
+
+func (r *sseResponseRecorder) Flush() {}
