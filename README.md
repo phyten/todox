@@ -78,6 +78,8 @@ The web form mirrors the server defaults: *ignore whitespace* starts checked (ma
 
 Modern browsers open an `EventSource` to `/api/scan/stream`, showing live stage progress (`scan → attr → pr`), throughput, ETA, and a cancel link that simply closes the stream (which cancels the server-side scan). Browsers without SSE support automatically fall back to a single `fetch(/api/scan)` request, preserving the previous behaviour. The cancel link also aborts the fallback request via `AbortController`. When `with_pr_links=0`, the `pr` step is hidden from the UI. During transient network issues the UI shows a small "reconnecting…" message while the browser auto-reconnects (3s).
 
+The server currently emits `progress`, `result`, `ping`, and both `error` and `server_error` events (the latter is the preferred payload; `error` is kept for backward compatibility). Clients should listen to `server_error` first and keep `error` handling as a fallback until older builds are updated.
+
 ---
 
 The embedded CSS honours `prefers-color-scheme` so light/dark mode follows the OS, and TODO/FIXME badges use WCAG AA-compliant foreground/background pairs.
