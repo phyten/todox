@@ -104,6 +104,7 @@
   let es=null;
   let lastSnap=null;
   let rafId=0;
+  let fetchAbort=null; // AbortController | null
 
   function showError(msg){
     bannerMsg.textContent=msg;
@@ -345,8 +346,11 @@
   async function startScanWithFetch(q){
     hideProgressUI();
     out.innerHTML='';
+    // フォールバック実行中のキャンセル対応
+    fetchAbort = new AbortController();
+    const { signal } = fetchAbort;
     try{
-      const res=await fetch('/api/scan?'+q.toString());
+      const res=await fetch('/api/scan?'+q.toString(), { signal });
       const raw=await res.text();
       if(!res.ok){
         let msg='HTTP '+res.status;
@@ -371,8 +375,14 @@
       }
       out.innerHTML=renderResultTable(data);
     }catch(err){
+      if(err && err.name === 'AbortError'){
+        // キャンセル時は静かに終了
+        return;
+      }
       console.error(err);
       showError(err instanceof Error?err.message:String(err));
+    } finally {
+      fetchAbort = null;
     }
   }
 
@@ -433,6 +443,10 @@
 
     btnCancel.onclick=()=>{
       closeStream();
+      if(fetchAbort){
+        try{ fetchAbort.abort(); }catch(_){ }
+        fetchAbort=null;
+      }
       hideProgressUI();
     };
   }
