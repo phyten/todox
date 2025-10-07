@@ -261,10 +261,12 @@
   function showProgressUI(){
     prog.hidden=false;
     resetProgressUI();
+    prog.setAttribute('aria-busy','true');
   }
 
   function hideProgressUI(){
     prog.hidden=true;
+    prog.removeAttribute('aria-busy');
     lastSnap=null;
     if(rafId && typeof cancelAnimationFrame==='function'){
       cancelAnimationFrame(rafId);
