@@ -1035,26 +1035,88 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		var currentRes *engine.Result
 		var prDoneCh <-chan prStageResult
 
-		for snapCh != nil || resCh != nil || errCh != nil || prDoneCh != nil {
+		// progress イベントの間引き（100ms）
+		const minProgressInterval = 100 * time.Millisecond
+		var lastProgressSent time.Time
+		var pendingSnap *progress.Snapshot
+		var throttleTimer *time.Timer
+		var throttleCh <-chan time.Time
+
+		stopThrottle := func() {
+			if throttleTimer == nil {
+				return
+			}
+			if !throttleTimer.Stop() {
+				select {
+				case <-throttleTimer.C:
+				default:
+				}
+			}
+			throttleTimer = nil
+			throttleCh = nil
+		}
+
+		flushPending := func() bool {
+			if pendingSnap == nil {
+				return false
+			}
+			if err := writeSSE(w, flusher, "progress", progressPayload(*pendingSnap)); err != nil {
+				obsCore.Close()
+				return true
+			}
+			lastProgressSent = time.Now()
+			pendingSnap = nil
+			stopThrottle()
+			return false
+		}
+
+		for snapCh != nil || resCh != nil || errCh != nil || prDoneCh != nil || throttleCh != nil {
 			select {
 			case <-ctx.Done():
 				obsCore.Close()
+				_ = flushPending()
 				return
 			case <-pingTicker.C:
 				if err := writeSSE(w, flusher, "ping", map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 					obsCore.Close()
+					_ = flushPending()
 					return
 				}
 			case snap, ok := <-snapCh:
 				if !ok {
+					if flushPending() {
+						return
+					}
 					snapCh = nil
 					continue
 				}
-				if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
-					obsCore.Close()
+				now := time.Now()
+				if lastProgressSent.IsZero() || now.Sub(lastProgressSent) >= minProgressInterval {
+					if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
+						obsCore.Close()
+						_ = flushPending()
+						return
+					}
+					lastProgressSent = now
+					pendingSnap = nil
+					stopThrottle()
+				} else {
+					ps := snap
+					pendingSnap = &ps
+					wait := minProgressInterval - now.Sub(lastProgressSent)
+					if throttleTimer == nil {
+						throttleTimer = time.NewTimer(wait)
+						throttleCh = throttleTimer.C
+					}
+				}
+			case <-throttleCh:
+				if flushPending() {
 					return
 				}
 			case res := <-resCh:
+				if flushPending() {
+					return
+				}
 				ApplySort(res.Items, inputs.SortSpec)
 				res.HasComment = inputs.FieldSel.ShowComment
 				res.HasMessage = inputs.FieldSel.ShowMessage
@@ -1062,25 +1124,32 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 				_ = applyLinkColumn(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel)
 
 				currentRes = res
-				prChan := make(chan prStageResult, 1)
-				if inputs.FieldSel.NeedPRs {
-					go func(res *engine.Result) {
-						start := time.Now()
-						err := applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
-							State:  inputs.PRState,
-							Limit:  inputs.PRLimit,
-							Prefer: inputs.PRPrefer,
-							Jobs:   inputs.Options.Jobs,
-						}, obsCore)
-						elapsed := time.Since(start)
-						res.ElapsedMS += elapsed.Milliseconds()
-						prChan <- prStageResult{elapsed: elapsed, err: err, hadPRs: true}
-						close(prChan)
-					}(res)
-				} else {
-					prChan <- prStageResult{hadPRs: false}
-					close(prChan)
+				if !inputs.FieldSel.NeedPRs {
+					if err := writeSSE(w, flusher, "result", currentRes); err != nil {
+						obsCore.Close()
+						return
+					}
+					obsCore.Close()
+					resCh = nil
+					errCh = nil
+					stopThrottle()
+					continue
 				}
+
+				prChan := make(chan prStageResult, 1)
+				go func(res *engine.Result) {
+					start := time.Now()
+					err := applyPRColumns(ctx, runner, inputs.Options.RepoDir, &remoteCache, res, inputs.FieldSel, prOptions{
+						State:  inputs.PRState,
+						Limit:  inputs.PRLimit,
+						Prefer: inputs.PRPrefer,
+						Jobs:   inputs.Options.Jobs,
+					}, obsCore)
+					elapsed := time.Since(start)
+					res.ElapsedMS += elapsed.Milliseconds()
+					prChan <- prStageResult{elapsed: elapsed, err: err, hadPRs: true}
+					close(prChan)
+				}(res)
 				prDoneCh = prChan
 				resCh = nil
 			case prStage, ok := <-prDoneCh:
@@ -1088,21 +1157,31 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 					prDoneCh = nil
 					continue
 				}
+				if flushPending() {
+					return
+				}
 				if prStage.err != nil {
 					_ = writeSSE(w, flusher, "error", map[string]string{"message": prStage.err.Error()})
+					_ = writeSSE(w, flusher, "server_error", map[string]string{"message": prStage.err.Error()})
 					obsCore.Close()
+					stopThrottle()
 					return
 				}
 				if err := writeSSE(w, flusher, "result", currentRes); err != nil {
 					obsCore.Close()
+					stopThrottle()
 					return
 				}
 				obsCore.Close()
 				prDoneCh = nil
 				errCh = nil
+				stopThrottle()
 			case runErr := <-errCh:
+				_ = flushPending()
 				obsCore.Close()
 				_ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
+				_ = writeSSE(w, flusher, "server_error", map[string]string{"message": runErr.Error()})
+				stopThrottle()
 				return
 			}
 		}

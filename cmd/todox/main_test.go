@@ -763,20 +763,20 @@ func TestApplySortは年齢順に並び替える(t *testing.T) {
 
 func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "render"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
 	}
-	noURLScript := `render({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false});`
-	yesURLScript := `render({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef",url:"https://example.com/blob"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:true});`
+	noURLScript := `renderResultTable({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false});`
+	yesURLScript := `renderResultTable({items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef",url:"https://example.com/blob"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:true});`
 	noVal, err := rt.RunString(noURLScript)
 	if err != nil {
-		t.Fatalf("render without URL failed: %v", err)
+		t.Fatalf("renderResultTable without URL failed: %v", err)
 	}
 	yesVal, err := rt.RunString(yesURLScript)
 	if err != nil {
-		t.Fatalf("render with URL failed: %v", err)
+		t.Fatalf("renderResultTable with URL failed: %v", err)
 	}
 	noHTML := noVal.String()
 	yesHTML := yesVal.String()
@@ -793,15 +793,15 @@ func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 
 func TestWebRenderIncludesPRColumn(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "render"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
 	}
-	script := `render({items:[{kind:"TODO",author:"Bob",email:"bob@example.com",date:"2024-01-02",file:"main.go",line:8,commit:"abcdef1234567890",prs:[{number:12,state:"open",url:"https://example.com/pull/12"}]}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:true});`
+	script := `renderResultTable({items:[{kind:"TODO",author:"Bob",email:"bob@example.com",date:"2024-01-02",file:"main.go",line:8,commit:"abcdef1234567890",prs:[{number:12,state:"open",url:"https://example.com/pull/12"}]}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:true});`
 	value, err := rt.RunString(script)
 	if err != nil {
-		t.Fatalf("render with PRs failed: %v", err)
+		t.Fatalf("renderResultTable with PRs failed: %v", err)
 	}
 	html := value.String()
 	if !strings.Contains(html, "<th>PRS</th>") {

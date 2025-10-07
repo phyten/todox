@@ -195,3 +195,83 @@ a.link-icon span {
     border-color: rgba(255, 255, 255, var(--badge-ring-opacity));
   }
 }
+
+.progress-wrap {
+  margin: 12px 0 16px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.progress-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.linklike {
+  background: none;
+  border: none;
+  color: var(--link);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.stepper {
+  display: flex;
+  gap: 10px;
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.stepper li {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.stepper li.current {
+  font-weight: 600;
+}
+
+.stepper li.done {
+  background: var(--surface);
+  opacity: 0.75;
+}
+
+.progressbar {
+  width: 100%;
+  height: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 4px 0 8px;
+}
+
+#progressbar-inner {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #93c5fd, #60a5fa);
+}
+
+@media (prefers-color-scheme: dark) {
+  #progressbar-inner {
+    background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+  }
+}
+
+.progress-footer {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: var(--muted);
+}
