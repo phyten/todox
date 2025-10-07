@@ -981,7 +981,7 @@ func apiScanHandler(repoDir string) http.HandlerFunc {
 }
 
 func apiScanStreamHandler(repoDir string) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -1002,9 +1002,9 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		_, _ = fmt.Fprint(w, "retry: 3000\n\n")
 		flusher.Flush()
 
-        obsCore, snapCh := newStreamObserver(64)
-        inputs.Options.Progress = false
-        inputs.Options.ProgressObserver = suppressCloseObserver{base: obsCore}
+		obsCore, snapCh := newStreamObserver(64)
+		inputs.Options.Progress = false
+		inputs.Options.ProgressObserver = suppressCloseObserver{base: obsCore}
 
 		runner := execx.DefaultRunner()
 
@@ -1035,66 +1035,89 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 		var currentRes *engine.Result
 		var prDoneCh <-chan prStageResult
 
-        // progress イベントの間引き（100ms）
-        const minProgressInterval = 100 * time.Millisecond
-        var lastProgressSent time.Time
-        var pendingSnap *progress.Snapshot
-        var throttleTimer *time.Timer
-        var throttleCh <-chan time.Time
+		// progress イベントの間引き（100ms）
+		const minProgressInterval = 100 * time.Millisecond
+		var lastProgressSent time.Time
+		var pendingSnap *progress.Snapshot
+		var throttleTimer *time.Timer
+		var throttleCh <-chan time.Time
 
-        flushPending := func() bool {
-            if pendingSnap == nil {
-                return false
-            }
-            if err := writeSSE(w, flusher, "progress", progressPayload(*pendingSnap)); err != nil {
-                obsCore.Close()
-                return true
-            }
-            lastProgressSent = time.Now()
-            pendingSnap = nil
-            if throttleTimer != nil { throttleTimer.Stop(); throttleTimer = nil; throttleCh = nil }
-            return false
-        }
+		stopThrottle := func() {
+			if throttleTimer == nil {
+				return
+			}
+			if !throttleTimer.Stop() {
+				select {
+				case <-throttleTimer.C:
+				default:
+				}
+			}
+			throttleTimer = nil
+			throttleCh = nil
+		}
 
-        for snapCh != nil || resCh != nil || errCh != nil || prDoneCh != nil {
-            select {
-            case <-ctx.Done():
-                obsCore.Close()
-                return
-            case <-pingTicker.C:
+		flushPending := func() bool {
+			if pendingSnap == nil {
+				return false
+			}
+			if err := writeSSE(w, flusher, "progress", progressPayload(*pendingSnap)); err != nil {
+				obsCore.Close()
+				return true
+			}
+			lastProgressSent = time.Now()
+			pendingSnap = nil
+			stopThrottle()
+			return false
+		}
+
+		for snapCh != nil || resCh != nil || errCh != nil || prDoneCh != nil || throttleCh != nil {
+			select {
+			case <-ctx.Done():
+				obsCore.Close()
+				_ = flushPending()
+				return
+			case <-pingTicker.C:
 				if err := writeSSE(w, flusher, "ping", map[string]string{"ts": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 					obsCore.Close()
+					_ = flushPending()
 					return
 				}
-            case snap, ok := <-snapCh:
-                if !ok {
-                    // stream 終了直前に保留分があれば flush
-                    if flushPending() { return }
-                    snapCh = nil
-                    continue
-                }
-                now := time.Now()
-                if lastProgressSent.IsZero() || now.Sub(lastProgressSent) >= minProgressInterval {
-                    if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
-                        obsCore.Close()
-                        return
-                    }
-                    lastProgressSent = now
-                    // 古い保留は破棄
-                    pendingSnap = nil
-                    if throttleTimer != nil { throttleTimer.Stop(); throttleTimer = nil; throttleCh = nil }
-                } else {
-                    // 最新だけ保持し、タイマでまとめて送信
-                    ps := snap
-                    pendingSnap = &ps
-                    wait := minProgressInterval - now.Sub(lastProgressSent)
-                    if throttleTimer == nil {
-                        throttleTimer = time.NewTimer(wait)
-                        throttleCh = throttleTimer.C
-                    }
-                }
-            case res := <-resCh:
-                ApplySort(res.Items, inputs.SortSpec)
+			case snap, ok := <-snapCh:
+				if !ok {
+					if flushPending() {
+						return
+					}
+					snapCh = nil
+					continue
+				}
+				now := time.Now()
+				if lastProgressSent.IsZero() || now.Sub(lastProgressSent) >= minProgressInterval {
+					if err := writeSSE(w, flusher, "progress", progressPayload(snap)); err != nil {
+						obsCore.Close()
+						_ = flushPending()
+						return
+					}
+					lastProgressSent = now
+					pendingSnap = nil
+					stopThrottle()
+				} else {
+					ps := snap
+					pendingSnap = &ps
+					wait := minProgressInterval - now.Sub(lastProgressSent)
+					if throttleTimer == nil {
+						throttleTimer = time.NewTimer(wait)
+						throttleCh = throttleTimer.C
+					}
+				}
+			case <-throttleCh:
+				if flushPending() {
+					return
+				}
+			case res := <-resCh:
+				if flushPending() {
+					return
+				}
+				ApplySort(res.Items, inputs.SortSpec)
 				res.HasComment = inputs.FieldSel.ShowComment
 				res.HasMessage = inputs.FieldSel.ShowMessage
 				res.HasAge = inputs.FieldSel.ShowAge
@@ -1122,36 +1145,40 @@ func apiScanStreamHandler(repoDir string) http.HandlerFunc {
 				}
 				prDoneCh = prChan
 				resCh = nil
-            case prStage, ok := <-prDoneCh:
-                if !ok {
-                    prDoneCh = nil
-                    continue
-                }
-                if prStage.err != nil {
-                    // 後方互換のため error と server_error の二重送信
-                    _ = writeSSE(w, flusher, "error", map[string]string{"message": prStage.err.Error()})
-                    _ = writeSSE(w, flusher, "server_error", map[string]string{"message": prStage.err.Error()})
-                    obsCore.Close()
-                    return
-                }
-                if err := writeSSE(w, flusher, "result", currentRes); err != nil {
-                    obsCore.Close()
-                    return
-                }
-                obsCore.Close()
-                prDoneCh = nil
-                errCh = nil
-            case <-throttleCh:
-                // タイマ発火時に保留を送信
-                if flushPending() { return }
-            case runErr := <-errCh:
-                obsCore.Close()
-                _ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
-                _ = writeSSE(w, flusher, "server_error", map[string]string{"message": runErr.Error()})
-                return
-            }
-        }
-    }
+			case prStage, ok := <-prDoneCh:
+				if !ok {
+					prDoneCh = nil
+					continue
+				}
+				if flushPending() {
+					return
+				}
+				if prStage.err != nil {
+					_ = writeSSE(w, flusher, "error", map[string]string{"message": prStage.err.Error()})
+					_ = writeSSE(w, flusher, "server_error", map[string]string{"message": prStage.err.Error()})
+					obsCore.Close()
+					stopThrottle()
+					return
+				}
+				if err := writeSSE(w, flusher, "result", currentRes); err != nil {
+					obsCore.Close()
+					stopThrottle()
+					return
+				}
+				obsCore.Close()
+				prDoneCh = nil
+				errCh = nil
+				stopThrottle()
+			case runErr := <-errCh:
+				_ = flushPending()
+				obsCore.Close()
+				_ = writeSSE(w, flusher, "error", map[string]string{"message": runErr.Error()})
+				_ = writeSSE(w, flusher, "server_error", map[string]string{"message": runErr.Error()})
+				stopThrottle()
+				return
+			}
+		}
+	}
 }
 
 func serveCmd(args []string) {
