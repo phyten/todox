@@ -79,6 +79,8 @@ Web フォームはサーバー既定に合わせています。`ignore whitespa
 
 SSE (`EventSource`) に対応したブラウザでは `/api/scan/stream` に接続し、`scan → attr → pr` のステージ進捗・処理速度・ETA をリアルタイムに表示します。キャンセルリンクはストリームを `close()` するだけなので、サーバー側のスキャンも即座に中断されます。SSE に対応していないブラウザでは自動的に従来どおりの `fetch(/api/scan)` にフォールバックします。フォールバック実行中のキャンセルは `AbortController` により即時中断されます。`with_pr_links=0` の場合は `pr` ステップは UI から非表示になり、断続的な回線では自動再接続（3 秒）中に "reconnecting…" が表示されます。
 
+テーブルヘッダーをクリックすると結果をローカルでソートできます（昇順/降順のトグル、空欄は常に末尾へ移動します）。PRS 列は `#番号 タイトル (state)` の形式で表示され、リンクへホバーすると PR 本文の先頭 280 文字がツールチップとして表示されます。ツールチップでは空白が折り畳まれ、JSON ペイロード内の Markdown/本文は従来どおり生のまま保持されます。
+
 サーバーは `progress`, `result`, `ping` に加えて `error` と `server_error` の両方を送信します（`server_error` が推奨、`error` は後方互換用）。クライアント側は `server_error` を優先しつつ、当面は `error` もフォールバックとしてハンドリングしてください。
 
 ---
@@ -150,7 +152,7 @@ todox --with-age --color always | less -R
 ![色付きテーブルの例](docs/color-table.png)
 
 > JSON 出力には常に `age_days` フィールドが含まれます。
-> `--with-commit-link` を有効にすると各 item に `url`、Result に `has_url` が追加されます。`--with-pr-links` を有効にすると各 item に `prs[]`、Result に `has_prs` が追加されます。これらは公開 API の一部であり将来も保持されます。
+> `--with-commit-link` を有効にすると各 item に `url`、Result に `has_url` が追加されます。`--with-pr-links` を有効にすると各 item に `prs[]`、Result に `has_prs` が追加されます（エントリは `{number,state,url,title,body}` を含みます。新フィールドは追加のみなので既存クライアントとの後方互換性は保たれます）。これらは公開 API の一部であり将来も保持されます。
 > `has_url` / `has_prs` は「データ取得済みか」の指標です（`--with-*` や `--fields` により内部取得されます）。列を非表示にしていてもメタ情報としては true になります。
 
 `--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。
@@ -176,7 +178,7 @@ todox --with-age --color always | less -R
   - Markdown ファイルでは `?plain=1#L<n>` を付与し、GitHub のレンダリングビューとアンカー競合しないようにしています。
 - `--with-pr-links` : コミットを含む PR 情報を追加
   - `--pr-state {all|open|closed|merged}` で状態フィルタ、`--pr-limit N`（1〜20、既定 3）で件数上限、`--pr-prefer {open|merged|closed|none}` で状態の優先順位を調整できます。
-  - 有効化すると各 item に `{number,state,url}` の配列 `prs[]` が追加され、Result には `has_prs` が立ちます。
+  - 有効化すると各 item に `{number,state,url,title,body}` の配列 `prs[]` が追加され、Result には `has_prs` が立ちます（空文字は `omitempty` で JSON から省かれます）。
   - プライベートリポジトリでは gh CLI の認証、または `GH_TOKEN` / `GITHUB_TOKEN` を環境変数に設定して REST API を利用してください。匿名リクエストはレートリミットに達しやすい点に注意してください。
   - PR 取得の並列度は `TODOX_GH_JOBS=<n>`（1〜32）で調整できます。既定では `jobs` の値と上限 32 の小さい方が採用されます。
 - `--full` : `--with-comment --with-message` のショートカット

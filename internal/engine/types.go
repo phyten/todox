@@ -28,6 +28,8 @@ type PullRequestRef struct {
 	Number int    `json:"number"`
 	State  string `json:"state"`
 	URL    string `json:"url"`
+	Title  string `json:"title,omitempty"`
+	Body   string `json:"body,omitempty"`
 }
 
 // ItemError は 1 行の取得に失敗した際の情報を表す

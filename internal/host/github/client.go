@@ -23,6 +23,7 @@ type PRInfo struct {
 	Title  string `json:"title"`
 	State  string `json:"state"`
 	URL    string `json:"url"`
+	Body   string `json:"body"`
 }
 
 // Client は GitHub (Enterprise を含む) 向けの最小ラッパーです。
@@ -78,6 +79,7 @@ func (c *Client) FindPullRequestsByCommit(ctx context.Context, sha string) ([]PR
 		Title    string    `json:"title"`
 		State    string    `json:"state"`
 		HTMLURL  string    `json:"html_url"`
+		Body     string    `json:"body"`
 		MergedAt time.Time `json:"merged_at"`
 	}
 	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
@@ -94,7 +96,11 @@ func (c *Client) FindPullRequestsByCommit(ctx context.Context, sha string) ([]PR
 			Title:  pr.Title,
 			State:  state,
 			URL:    pr.HTMLURL,
+			Body:   pr.Body,
 		})
+	}
+	if needsPRBodyHydration(infos) {
+		c.populatePRBodies(ctx, infos)
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Number < infos[j].Number })
 	return infos, nil
@@ -163,6 +169,7 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 			Title    string    `json:"title"`
 			State    string    `json:"state"`
 			URL      string    `json:"url"`
+			Body     string    `json:"body"`
 			MergedAt time.Time `json:"mergedAt"`
 		}
 		if unmarshalErr := json.Unmarshal(out, &raw); unmarshalErr != nil {
@@ -174,32 +181,37 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 			if strings.EqualFold(state, "closed") && !pr.MergedAt.IsZero() {
 				state = "merged"
 			}
-			prs = append(prs, PRInfo{Number: pr.Number, Title: pr.Title, State: state, URL: pr.URL})
+			prs = append(prs, PRInfo{Number: pr.Number, Title: pr.Title, State: state, URL: pr.URL, Body: pr.Body})
+		}
+		if needsPRBodyHydration(prs) {
+			c.populatePRBodies(ctx, prs)
 		}
 		sort.Slice(prs, func(i, j int) bool { return prs[i].Number < prs[j].Number })
 		return prs, nil
 	}
-	if execx.IsNotFound(err) {
-		return nil, err
-	}
-	if len(stderr) > 0 && c.token == "" {
-		return nil, fmt.Errorf("gh pr list failed: %w: %s", err, strings.TrimSpace(string(stderr)))
-	}
+	msg := strings.TrimSpace(string(stderr))
 	query := url.Values{}
 	query.Set("state", "all")
 	query.Set("head", fmt.Sprintf("%s:%s", c.info.Owner, branch))
 	data, restErr := c.callREST(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls", c.info.Owner, c.info.Repo), query)
 	if restErr != nil {
-		if len(stderr) > 0 {
-			return nil, fmt.Errorf("gh pr list failed: %w: %s", err, strings.TrimSpace(string(stderr)))
+		if execx.IsNotFound(err) {
+			if msg != "" {
+				return nil, fmt.Errorf("gh command not found: %s; REST fallback failed: %w", msg, restErr)
+			}
+			return nil, fmt.Errorf("gh command not found; REST fallback failed: %w", restErr)
 		}
-		return nil, restErr
+		if msg != "" {
+			return nil, fmt.Errorf("gh pr list failed: %w: %s; REST fallback failed: %v", err, msg, restErr)
+		}
+		return nil, fmt.Errorf("gh pr list failed: %w; REST fallback failed: %v", err, restErr)
 	}
 	var raw []struct {
 		Number   int       `json:"number"`
 		Title    string    `json:"title"`
 		State    string    `json:"state"`
 		HTMLURL  string    `json:"html_url"`
+		Body     string    `json:"body"`
 		MergedAt time.Time `json:"merged_at"`
 	}
 	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
@@ -211,10 +223,69 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 		if strings.EqualFold(state, "closed") && !pr.MergedAt.IsZero() {
 			state = "merged"
 		}
-		prs = append(prs, PRInfo{Number: pr.Number, Title: pr.Title, State: state, URL: pr.HTMLURL})
+		prs = append(prs, PRInfo{Number: pr.Number, Title: pr.Title, State: state, URL: pr.HTMLURL, Body: pr.Body})
+	}
+	if needsPRBodyHydration(prs) {
+		c.populatePRBodies(ctx, prs)
 	}
 	sort.Slice(prs, func(i, j int) bool { return prs[i].Number < prs[j].Number })
 	return prs, nil
+}
+
+func needsPRBodyHydration(prs []PRInfo) bool {
+	for i := range prs {
+		if strings.TrimSpace(prs[i].Body) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) populatePRBodies(ctx context.Context, prs []PRInfo) {
+	if len(prs) == 0 {
+		return
+	}
+	cache := make(map[int]string, len(prs))
+	for i := range prs {
+		number := prs[i].Number
+		if number <= 0 {
+			continue
+		}
+		if strings.TrimSpace(prs[i].Body) != "" {
+			continue
+		}
+		body, ok := cache[number]
+		if !ok {
+			fetched, err := c.fetchPullRequestBody(ctx, number)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				cache[number] = ""
+				continue
+			}
+			body = fetched
+			cache[number] = body
+		}
+		prs[i].Body = body
+	}
+}
+
+func (c *Client) fetchPullRequestBody(ctx context.Context, number int) (string, error) {
+	if number <= 0 {
+		return "", errors.New("pull request number must be positive")
+	}
+	data, err := c.callREST(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", c.info.Owner, c.info.Repo, number), nil)
+	if err != nil {
+		return "", err
+	}
+	var raw struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return "", err
+	}
+	return raw.Body, nil
 }
 
 // CreatePullRequest は gh CLI を利用して PR を作成します。

@@ -78,6 +78,8 @@ The web form mirrors the server defaults: *ignore whitespace* starts checked (ma
 
 Modern browsers open an `EventSource` to `/api/scan/stream`, showing live stage progress (`scan → attr → pr`), throughput, ETA, and a cancel link that simply closes the stream (which cancels the server-side scan). Browsers without SSE support automatically fall back to a single `fetch(/api/scan)` request, preserving the previous behaviour. The cancel link also aborts the fallback request via `AbortController`. When `with_pr_links=0`, the `pr` step is hidden from the UI. During transient network issues the UI shows a small "reconnecting…" message while the browser auto-reconnects (3s).
 
+Click any table header to sort results locally (ascending/descending toggle; empty values always sink to the bottom). The PR column now renders `#<number> <title> (state)` and hovering the link shows the first 280 characters of the PR description. Tooltips collapse whitespace and honour the existing escaping so the raw Markdown remains unchanged in the JSON payload.
+
 The server currently emits `progress`, `result`, `ping`, and both `error` and `server_error` events (the latter is the preferred payload; `error` is kept for backward compatibility). Clients should listen to `server_error` first and keep `error` handling as a fallback until older builds are updated.
 
 ---
@@ -149,7 +151,7 @@ todox --with-age --color always | less -R
 ![Colorized table output](docs/color-table.png)
 
 > JSON output always includes an `age_days` field for each item.
-> When commit link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`. Enabling PR links populates `prs[]` alongside `has_prs`. These fields are part of the public API surface and will remain stable.
+> When commit link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`. Enabling PR links populates `prs[]` alongside `has_prs`; every entry exposes `{number,state,url,title,body}` (the new fields are additive so older clients remain compatible). These fields are part of the public API surface and will remain stable.
 > Note that `has_url` / `has_prs` indicate that the data was collected (via `--with-*` or explicit `--fields` selections); a column may still be hidden depending on the renderer.
 
 `--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/TSV/JSON outputs.
@@ -175,7 +177,7 @@ Fields you can reference via `--fields` (table/TSV outputs):
   - Markdown files append `?plain=1#L<n>` to avoid GitHub anchor collisions with the rendered view.
 - `--with-pr-links`: attach pull requests that contain each commit.
   - Combine with `--pr-state {all|open|closed|merged}` to filter by state, `--pr-limit N` (1–20, default 3) to cap the number of PRs per item, and `--pr-prefer {open|merged|closed|none}` to influence ordering when multiple states are present.
-  - Results populate `prs[]` per item and set `has_prs=true` in JSON/table metadata. Each entry exposes `{number,state,url}`.
+  - Results populate `prs[]` per item and set `has_prs=true` in JSON/table metadata. Each entry exposes `{number,state,url,title,body}` (empty strings are omitted from JSON via `omitempty`).
   - Authenticate with the GitHub CLI (`gh`) or export `GH_TOKEN` / `GITHUB_TOKEN` for REST access when scanning private repositories; anonymous requests can hit rate limits quickly.
   - Tune the PR fetching worker pool with `TODOX_GH_JOBS=<n>` (1–32). The default uses the smaller of `jobs` and 32.
 - `--full`: shorthand for `--with-comment --with-message`

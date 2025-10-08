@@ -1401,6 +1401,8 @@ func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, ca
 					Number: pr.Number,
 					State:  strings.ToLower(strings.TrimSpace(pr.State)),
 					URL:    pr.URL,
+					Title:  pr.Title,
+					Body:   pr.Body,
 				})
 			}
 			for _, idx := range commitToIndexes[result.commit] {
