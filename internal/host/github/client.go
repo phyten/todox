@@ -189,15 +189,18 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 		sort.Slice(prs, func(i, j int) bool { return prs[i].Number < prs[j].Number })
 		return prs, nil
 	}
-	if execx.IsNotFound(err) {
-		return nil, err
-	}
+	msg := strings.TrimSpace(string(stderr))
 	query := url.Values{}
 	query.Set("state", "all")
 	query.Set("head", fmt.Sprintf("%s:%s", c.info.Owner, branch))
 	data, restErr := c.callREST(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls", c.info.Owner, c.info.Repo), query)
 	if restErr != nil {
-		msg := strings.TrimSpace(string(stderr))
+		if execx.IsNotFound(err) {
+			if msg != "" {
+				return nil, fmt.Errorf("gh command not found: %s; REST fallback failed: %w", msg, restErr)
+			}
+			return nil, fmt.Errorf("gh command not found; REST fallback failed: %w", restErr)
+		}
 		if msg != "" {
 			return nil, fmt.Errorf("gh pr list failed: %w: %s; REST fallback failed: %v", err, msg, restErr)
 		}

@@ -182,6 +182,53 @@ func TestFindPullRequestsByHeadFallsBackToRESTWhenCLIFailsEvenWithStderr(t *test
 	}
 }
 
+func TestFindPullRequestsByHeadFallsBackToRESTWhenGhMissing(t *testing.T) {
+	var listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/repos/acme/proj/pulls" {
+			listCalls++
+			payload := []map[string]any{{
+				"number":   11,
+				"title":    "Docs tweaks",
+				"state":    "open",
+				"html_url": "https://example.com/pr/11",
+				"body":     "From REST list",
+			}}
+			if err := json.NewEncoder(w).Encode(payload); err != nil {
+				t.Fatalf("failed to encode list response: %v", err)
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	client := &Client{
+		info:       gitremote.Info{Host: parsed.Host, Owner: "acme", Repo: "proj", Scheme: parsed.Scheme},
+		runner:     notFoundRunner{},
+		httpClient: server.Client(),
+	}
+
+	prs, err := client.FindPullRequestsByHead(context.Background(), "feature-branch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if listCalls != 1 {
+		t.Fatalf("expected list endpoint to be called once, got %d", listCalls)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Number != 11 || prs[0].Body != "From REST list" {
+		t.Fatalf("unexpected PR info: %+v", prs[0])
+	}
+}
+
 func TestFindPullRequestsByCommitFetchesMissingBody(t *testing.T) {
 	var commitCalls, detailCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
