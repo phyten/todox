@@ -157,7 +157,7 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 	if branch == "" {
 		return nil, errors.New("branch is required")
 	}
-	args := []string{"pr", "list", "--state", "all", "--json", "number,title,state,url,mergedAt,body", "--head", branch}
+	args := []string{"pr", "list", "--state", "all", "--json", "number,title,state,url,mergedAt", "--head", branch}
 	args = append(args, "--repo", fmt.Sprintf("%s/%s", c.info.Owner, c.info.Repo))
 	if c.info.Host != "" && !strings.EqualFold(c.info.Host, "github.com") {
 		args = append(args, "--hostname", c.info.Host)
@@ -192,18 +192,16 @@ func (c *Client) FindPullRequestsByHead(ctx context.Context, branch string) ([]P
 	if execx.IsNotFound(err) {
 		return nil, err
 	}
-	if len(stderr) > 0 && c.token == "" {
-		return nil, fmt.Errorf("gh pr list failed: %w: %s", err, strings.TrimSpace(string(stderr)))
-	}
 	query := url.Values{}
 	query.Set("state", "all")
 	query.Set("head", fmt.Sprintf("%s:%s", c.info.Owner, branch))
 	data, restErr := c.callREST(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls", c.info.Owner, c.info.Repo), query)
 	if restErr != nil {
-		if len(stderr) > 0 {
-			return nil, fmt.Errorf("gh pr list failed: %w: %s", err, strings.TrimSpace(string(stderr)))
+		msg := strings.TrimSpace(string(stderr))
+		if msg != "" {
+			return nil, fmt.Errorf("gh pr list failed: %w: %s; REST fallback failed: %v", err, msg, restErr)
 		}
-		return nil, restErr
+		return nil, fmt.Errorf("gh pr list failed: %w; REST fallback failed: %v", err, restErr)
 	}
 	var raw []struct {
 		Number   int       `json:"number"`
