@@ -883,7 +883,7 @@ return sorted.map(r=>{const v=r&&r.author;return v?String(v):(v===""?"(empty)":"
 	if authorParts[0] != "Carol" || authorParts[1] != "Bob" {
 		t.Fatalf("descending author sort should rank non-empty values first, got: %v", authorParts)
 	}
-	if !(authorParts[2] == "(empty)" || authorParts[2] == "(none)") || !(authorParts[3] == "(empty)" || authorParts[3] == "(none)") {
+	if (authorParts[2] != "(empty)" && authorParts[2] != "(none)") || (authorParts[3] != "(empty)" && authorParts[3] != "(none)") {
 		t.Fatalf("empty author values should appear at the end, got: %v", authorParts)
 	}
 	if authorParts[2] == authorParts[3] {
