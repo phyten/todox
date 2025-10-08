@@ -763,7 +763,7 @@ func TestApplySortは年齢順に並び替える(t *testing.T) {
 
 func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "renderResultTable"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
@@ -780,11 +780,14 @@ func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	}
 	noHTML := noVal.String()
 	yesHTML := yesVal.String()
-	if strings.Contains(noHTML, "<th>URL</th>") || strings.Contains(noHTML, "link-icon") {
+	if strings.Contains(noHTML, "data-key=\"url\"") || strings.Contains(noHTML, "link-icon") {
 		t.Fatalf("URL 列は has_url=false では表示されない想定です: %s", noHTML)
 	}
-	if !strings.Contains(yesHTML, "<th>URL</th>") {
+	if !strings.Contains(yesHTML, "data-key=\"url\"") {
 		t.Fatalf("has_url=true で URL ヘッダーが欠けています: %s", yesHTML)
+	}
+	if !strings.Contains(yesHTML, ">URL</button>") {
+		t.Fatalf("URL ヘッダーのボタンラベルが欠落しています: %s", yesHTML)
 	}
 	if !strings.Contains(yesHTML, "aria-label=\"GitHub で開く\"") {
 		t.Fatalf("アクセシブルラベルが不足しています: %s", yesHTML)
@@ -793,25 +796,119 @@ func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 
 func TestWebRenderIncludesPRColumn(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "renderResultTable"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
 	}
-	script := `renderResultTable({items:[{kind:"TODO",author:"Bob",email:"bob@example.com",date:"2024-01-02",file:"main.go",line:8,commit:"abcdef1234567890",prs:[{number:12,state:"open",url:"https://example.com/pull/12"}]}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:true});`
+	script := `renderResultTable({items:[{kind:"TODO",author:"Bob",email:"bob@example.com",date:"2024-01-02",file:"main.go",line:8,commit:"abcdef1234567890",prs:[{number:12,state:"open",url:"https://example.com/pull/12",title:"Example PR",body:"This PR fixes bug\\nand adds tests."}]}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:true});`
 	value, err := rt.RunString(script)
 	if err != nil {
 		t.Fatalf("renderResultTable with PRs failed: %v", err)
 	}
 	html := value.String()
-	if !strings.Contains(html, "<th>PRS</th>") {
+	if !strings.Contains(html, "data-key=\"prs\"") {
 		t.Fatalf("PRS header missing: %s", html)
 	}
 	if !strings.Contains(html, "href=\"https://example.com/pull/12\"") {
 		t.Fatalf("PR link missing: %s", html)
 	}
-	if !strings.Contains(html, "#12</a>(open)") {
+	if !strings.Contains(html, "#12</a> Example PR (open)") {
 		t.Fatalf("PR summary missing: %s", html)
+	}
+	normalized := strings.Join(strings.Fields(strings.NewReplacer("\r", " ", "\n", " ", "\\n", " ", "\\r", " ").Replace(html)), " ")
+	if !strings.Contains(normalized, "title=\"This PR fixes bug and adds tests.\"") {
+		t.Fatalf("PR tooltip missing: %s", html)
+	}
+}
+
+func TestWebRenderAppliesAriaSortAttributes(t *testing.T) {
+	rt := goja.New()
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
+		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
+			t.Fatalf("failed to load %s: %v", fn, err)
+		}
+	}
+
+	dataLiteral := `{items:[{kind:"TODO",author:"Alice",email:"alice@example.com",date:"2024-01-01",file:"main.go",line:7,commit:"1234567890abcdef"}],errors:[],has_comment:false,has_message:false,has_age:false,has_url:false,has_prs:false}`
+
+	noSortScript := `(()=>{const data=` + dataLiteral + `;return renderResultTable(data,{rows:data.items});})()`
+	noSortVal, err := rt.RunString(noSortScript)
+	if err != nil {
+		t.Fatalf("renderResultTable without sort failed: %v", err)
+	}
+	noSortHTML := noSortVal.String()
+	if strings.Contains(noSortHTML, "aria-sort=\"ascending\"") || strings.Contains(noSortHTML, "aria-sort=\"descending\"") {
+		t.Fatalf("unsorted table should not mark ascending/descending: %s", noSortHTML)
+	}
+	if !strings.Contains(noSortHTML, "<th aria-sort=\"none\"><button type=\"button\" class=\"sort-btn\" data-key=\"kind\">TYPE</button></th>") {
+		t.Fatalf("aria-sort=none missing for unsorted headers: %s", noSortHTML)
+	}
+
+	sortedScript := `(()=>{const data=` + dataLiteral + `;return renderResultTable(data,{rows:data.items,sortKey:"author",sortDesc:false});})()`
+	sortedVal, err := rt.RunString(sortedScript)
+	if err != nil {
+		t.Fatalf("renderResultTable with sort failed: %v", err)
+	}
+	sortedHTML := sortedVal.String()
+	if !strings.Contains(sortedHTML, "<th aria-sort=\"ascending\"><button type=\"button\" class=\"sort-btn asc\" data-key=\"author\">AUTHOR</button></th>") {
+		t.Fatalf("sorted column should expose aria-sort=ascending: %s", sortedHTML)
+	}
+	if !strings.Contains(sortedHTML, "<th aria-sort=\"none\"><button type=\"button\" class=\"sort-btn\" data-key=\"kind\">TYPE</button></th>") {
+		t.Fatalf("non-active headers should retain aria-sort=none: %s", sortedHTML)
+	}
+}
+
+func TestWebSortKeepsEmptyValuesLastDescending(t *testing.T) {
+	rt := goja.New()
+	for _, fn := range []string{"compareStrings", "compareNumbers", "compareLocation", "comparePRs", "compareRows", "isValueEmptyForKey", "sortRows"} {
+		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
+			t.Fatalf("failed to load %s: %v", fn, err)
+		}
+	}
+
+	authorScript := `(()=>{
+const rows=[{author:"Bob"},{author:""},{},{author:"Carol"}];
+const sorted=sortRows(rows,"author",true);
+return sorted.map(r=>{const v=r&&r.author;return v?String(v):(v===""?"(empty)":"(none)");}).join("|");
+})()`
+	authorVal, err := rt.RunString(authorScript)
+	if err != nil {
+		t.Fatalf("author sort script failed: %v", err)
+	}
+	authorParts := strings.Split(authorVal.String(), "|")
+	if len(authorParts) != 4 {
+		t.Fatalf("unexpected author sort result length: %v", authorParts)
+	}
+	if authorParts[0] != "Carol" || authorParts[1] != "Bob" {
+		t.Fatalf("descending author sort should rank non-empty values first, got: %v", authorParts)
+	}
+	if !(authorParts[2] == "(empty)" || authorParts[2] == "(none)") || !(authorParts[3] == "(empty)" || authorParts[3] == "(none)") {
+		t.Fatalf("empty author values should appear at the end, got: %v", authorParts)
+	}
+	if authorParts[2] == authorParts[3] {
+		// require that both sentinel categories are represented
+		t.Fatalf("expected both empty and none markers, got: %v", authorParts)
+	}
+
+	ageScript := `(()=>{
+const rows=[{age_days:10},{},{age_days:5},{age_days:null}];
+const sorted=sortRows(rows,"age_days",true);
+return sorted.map(r=>{const v=r&&r.age_days;return (typeof v==="number" && isFinite(v))?String(v):"(empty)";}).join("|");
+})()`
+	ageVal, err := rt.RunString(ageScript)
+	if err != nil {
+		t.Fatalf("age sort script failed: %v", err)
+	}
+	ageParts := strings.Split(ageVal.String(), "|")
+	if len(ageParts) != 4 {
+		t.Fatalf("unexpected age sort result length: %v", ageParts)
+	}
+	if ageParts[0] != "10" || ageParts[1] != "5" {
+		t.Fatalf("descending age sort should keep numeric values first, got: %v", ageParts)
+	}
+	if ageParts[2] != "(empty)" || ageParts[3] != "(empty)" {
+		t.Fatalf("numeric empties should be grouped at the end, got: %v", ageParts)
 	}
 }
 

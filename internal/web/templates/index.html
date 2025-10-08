@@ -105,6 +105,10 @@
   let lastSnap=null;
   let rafId=0;
   let fetchAbort=null; // AbortController | null
+  let latestResult=null;
+  let tableRows=[];
+  let sortKey=null;
+  let sortDesc=false;
 
   function showError(msg){
     bannerMsg.textContent=msg;
@@ -132,6 +136,33 @@
       .replace(/'/g,'&#39;');
   }
 
+  function collapseWhitespace(value){
+    return String(value||'').replace(/\s+/g,' ').trim();
+  }
+
+  function ellipsize(text,max){
+    const raw=String(text||'');
+    if(!max||max<=0||raw.length<=max){
+      return raw;
+    }
+    if(max<=1){
+      return raw.slice(0,max);
+    }
+    return raw.slice(0,max-1)+'…';
+  }
+
+  function normalizePRTooltip(body){
+    const collapsed=String(body||'')
+      .replace(/\r?\n/g,' ')
+      .replace(/\\[rn]/g,' ')
+      .replace(/\s+/g,' ')
+      .trim();
+    if(!collapsed){
+      return '';
+    }
+    return ellipsize(collapsed,280);
+  }
+
   function renderBadge(kind){
     const raw=String(kind||'');
     if(!raw){
@@ -145,12 +176,12 @@
     return '<span class="badge" data-type="'+dataType+'">'+escText(upper)+'</span>';
   }
 
-  function renderResultTable(data){
-    if(!data || typeof data!=='object'){
-      return '<p>No results.</p>';
-    }
-    const rows=Array.isArray(data.items)?data.items:[];
-    const errs=Array.isArray(data.errors)?data.errors:[];
+  function renderResultTable(data,opts){
+    const info=(data&&typeof data==='object')?data:{};
+    const options=opts||{};
+    const rowsSource=options.rows;
+    const rows=Array.isArray(rowsSource)?rowsSource:(Array.isArray(info.items)?info.items:[]);
+    const errs=Array.isArray(info.errors)?info.errors:[];
     const parts=[];
     if(errs.length>0){
       let list='<ul>';
@@ -168,84 +199,334 @@
       parts.push('<p>No results.</p>');
       return parts.join('');
     }
-    const hasAge=!!data.has_age;
-    const hasComment=!!data.has_comment;
-    const hasMessage=!!data.has_message;
-    const hasURL=!!data.has_url;
-    const hasPRS=!!data.has_prs;
-    const headerCells=['TYPE','AUTHOR','EMAIL','DATE'];
-    if(hasAge){headerCells.push('AGE');}
-    headerCells.push('COMMIT','LOCATION');
-    if(hasURL){headerCells.push('URL');}
-    if(hasPRS){headerCells.push('PRS');}
-    if(hasComment){headerCells.push('COMMENT');}
-    if(hasMessage){headerCells.push('MESSAGE');}
-    let h='<table><thead><tr>'+headerCells.map(hd=>'<th>'+hd+'</th>').join('')+'</tr></thead><tbody>';
+    const headerMeta=buildHeaderMeta(info);
+    const activeKey=options.sortKey?String(options.sortKey):null;
+    const activeDesc=!!options.sortDesc;
+    const head=headerMeta.map(meta=>{
+      const classes=['sort-btn'];
+      if(activeKey===meta.key){
+        classes.push(activeDesc?'desc':'asc');
+      }
+      const ariaSort=activeKey===meta.key?(activeDesc?'descending':'ascending'):'none';
+      return '<th aria-sort="'+ariaSort+'"><button type="button" class="'+classes.join(' ')+'" data-key="'+escAttr(meta.key)+'">'+escText(meta.label)+'</button></th>';
+    }).join('');
+    let tableHTML='<table><thead><tr>'+head+'</tr></thead><tbody>';
     for(const r of rows){
       const cells=[];
-      cells.push('<td>'+renderBadge(r&&r.kind)+'</td>');
-      cells.push('<td>'+escText(r&&r.author)+'</td>');
-      cells.push('<td>'+escText(r&&r.email)+'</td>');
-      cells.push('<td>'+escText(r&&r.date)+'</td>');
-      if(hasAge){
-        const ageRaw=r&&r.age_days!=null?String(r.age_days):'';
-        cells.push('<td>'+escText(ageRaw)+'</td>');
+      for(const meta of headerMeta){
+        cells.push('<td>'+renderTableCell(meta.key,r,info)+'</td>');
       }
-      const commitRaw=r&&r.commit?String(r.commit).slice(0,8):'';
-      cells.push('<td><code>'+escText(commitRaw)+'</code></td>');
-      const fileRaw=r&&r.file?String(r.file):'';
-      const lineRaw=r&&typeof r.line==='number'&&r.line>0?String(r.line):'';
-      cells.push('<td><code>'+escText(fileRaw+':'+lineRaw)+'</code></td>');
-      if(hasURL){
-        const urlRaw=r&&r.url?String(r.url):'';
-        if(urlRaw){
-          const href=escAttr(urlRaw);
-          cells.push('<td><a class="link-icon" href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="GitHub で開く"><span aria-hidden="true">🔗</span></a></td>');
-        }else{
-          cells.push('<td></td>');
-        }
-      }
-      if(hasPRS){
-        const list=Array.isArray(r&&r.prs)?r.prs:[];
-        if(list.length){
-          const entries=[];
-          for(const pr of list){
-            const num=pr&&typeof pr.number==='number'&&isFinite(pr.number)&&pr.number>0?pr.number:null;
-            const rawState=pr&&pr.state!=null?String(pr.state).trim():'';
-            const stateLower=rawState.toLowerCase();
-            const displayState=stateLower||'unknown';
-            const stateSuffix='('+escText(displayState)+')';
-            if(num!==null && pr && pr.url){
-              const href=escAttr(String(pr.url));
-              const ariaState=displayState?displayState.charAt(0).toUpperCase()+displayState.slice(1)+' ':'';
-              const aria=ariaState+'PR #'+num;
-              entries.push('<a href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="'+escAttr(aria)+'">#'+num+'</a>'+stateSuffix);
-            }else if(num!==null){
-              entries.push('#'+num+stateSuffix);
-            }else if(pr && pr.url){
-              const href=escAttr(String(pr.url));
-              const aria=displayState?displayState.charAt(0).toUpperCase()+displayState.slice(1)+' pull request':'Pull request';
-              entries.push('<a href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="'+escAttr(aria)+'">'+stateSuffix+'</a>');
-            }else{
-              entries.push(stateSuffix);
-            }
-          }
-          cells.push('<td>'+entries.join('; ')+'</td>');
-        }else{
-          cells.push('<td></td>');
-        }
-      }
-      if(hasComment){
-        cells.push('<td>'+escText(r&&r.comment)+'</td>');
-      }
-      if(hasMessage){
-        cells.push('<td>'+escText(r&&r.message)+'</td>');
-      }
-      h+='<tr>'+cells.join('')+'</tr>';
+      tableHTML+='<tr>'+cells.join('')+'</tr>';
     }
-    h+='</tbody></table>';
-    parts.push(h);
+    tableHTML+='</tbody></table>';
+    parts.push(tableHTML);
     return parts.join('');
+  }
+
+  function buildHeaderMeta(info){
+    const meta=[
+      {key:'kind',label:'TYPE'},
+      {key:'author',label:'AUTHOR'},
+      {key:'email',label:'EMAIL'},
+      {key:'date',label:'DATE'}
+    ];
+    if(info&&info.has_age){
+      meta.push({key:'age_days',label:'AGE'});
+    }
+    meta.push({key:'commit',label:'COMMIT'});
+    meta.push({key:'location',label:'LOCATION'});
+    if(info&&info.has_url){
+      meta.push({key:'url',label:'URL'});
+    }
+    if(info&&info.has_prs){
+      meta.push({key:'prs',label:'PRS'});
+    }
+    if(info&&info.has_comment){
+      meta.push({key:'comment',label:'COMMENT'});
+    }
+    if(info&&info.has_message){
+      meta.push({key:'message',label:'MESSAGE'});
+    }
+    return meta;
+  }
+
+  function renderTableCell(key,row){
+    const r=row||{};
+    switch(key){
+      case 'kind':
+        return renderBadge(r.kind);
+      case 'author':
+        return escText(r.author);
+      case 'email':
+        return escText(r.email);
+      case 'date':
+        return escText(r.date);
+      case 'age_days':{
+        const ageRaw=(typeof r.age_days==='number'&&isFinite(r.age_days))?String(r.age_days):(r.age_days===0?'0':'');
+        return escText(ageRaw);
+      }
+      case 'commit':{
+        const commitRaw=r.commit?String(r.commit).slice(0,8):'';
+        return '<code>'+escText(commitRaw)+'</code>';
+      }
+      case 'location':{
+        const fileRaw=r.file?String(r.file):'';
+        const lineRaw=(typeof r.line==='number'&&r.line>0)?String(r.line):'';
+        return '<code>'+escText(fileRaw+':'+lineRaw)+'</code>';
+      }
+      case 'url':{
+        const urlRaw=r.url?String(r.url):'';
+        if(!urlRaw){
+          return '';
+        }
+        const href=escAttr(urlRaw);
+        return '<a class="link-icon" href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="GitHub で開く"><span aria-hidden="true">🔗</span></a>';
+      }
+      case 'prs':
+        return renderPRCell(r.prs);
+      case 'comment':
+        return escText(r.comment);
+      case 'message':
+        return escText(r.message);
+      default:
+        return escText(r[key]);
+    }
+  }
+
+  function renderPRCell(value){
+    const list=Array.isArray(value)?value:[];
+    if(!list.length){
+      return '';
+    }
+    const entries=[];
+    for(const pr of list){
+      const info=pr||{};
+      const numValue=typeof info.number==='number'?info.number:Number(info.number);
+      const hasNumber=Number.isFinite(numValue)&&numValue>0;
+      const numberText=hasNumber?String(Math.trunc(numValue)):'';
+      const stateRaw=info.state!=null?String(info.state):'';
+      const state=stateRaw.trim().toLowerCase()||'unknown';
+      const titleRaw=info.title!=null?String(info.title):'';
+      const titleText=titleRaw.trim();
+      const tooltip=normalizePRTooltip(info.body);
+      const anchorLabel=hasNumber?'#'+numberText:(titleText||state||'#');
+      const ariaParts=[];
+      if(hasNumber){
+        ariaParts.push('PR #'+numberText);
+      }else{
+        ariaParts.push('Pull request');
+        if(titleText){
+          ariaParts.push(titleText);
+        }
+      }
+      if(state){
+        ariaParts.push(state);
+      }
+      const ariaLabel=ariaParts.join(' ').trim();
+      let leading=escText(anchorLabel);
+      if(info.url){
+        const attrs=['href="'+escAttr(String(info.url))+'"','target="_blank"','rel="noopener noreferrer"'];
+        if(ariaLabel){
+          attrs.push('aria-label="'+escAttr(ariaLabel)+'"');
+        }
+        if(tooltip){
+          attrs.push('title="'+escAttr(tooltip)+'"');
+        }
+        leading='<a '+attrs.join(' ')+'>'+escText(anchorLabel)+'</a>';
+      }else if(tooltip){
+        leading='<span title="'+escAttr(tooltip)+'">'+leading+'</span>';
+      }
+      let titleSuffix='';
+      if(hasNumber && titleText){
+        titleSuffix=' '+escText(titleText);
+      }else if(!hasNumber && titleText && anchorLabel!==titleText){
+        titleSuffix=' '+escText(titleText);
+      }
+      entries.push(leading+titleSuffix+' ('+escText(state)+')');
+    }
+    return entries.join('; ');
+  }
+
+  function sortRows(rows,key,desc){
+    const base=Array.isArray(rows)?rows.slice():[];
+    if(!key){
+      return base;
+    }
+    base.sort((left,right)=>{
+      const leftEmpty=isValueEmptyForKey(left,key);
+      const rightEmpty=isValueEmptyForKey(right,key);
+      if(leftEmpty!==rightEmpty){
+        return leftEmpty?1:-1;
+      }
+      const cmp=compareRows(left,right,key);
+      return desc?-cmp:cmp;
+    });
+    return base;
+  }
+
+  function isValueEmptyForKey(row,key){
+    const r=row||{};
+    switch(key){
+      case 'age_days':
+        return !(typeof r.age_days==='number' && isFinite(r.age_days));
+      case 'commit':
+      case 'date':
+      case 'author':
+      case 'email':
+      case 'kind':
+      case 'comment':
+      case 'message':
+      case 'url':{
+        const val=r[key];
+        return val==null || String(val).trim()==='';
+      }
+      case 'location':{
+        const file=r.file!=null?String(r.file).trim():'';
+        const hasLine=typeof r.line==='number' && r.line>0;
+        return !file && !hasLine;
+      }
+      case 'prs':
+        return !(Array.isArray(r.prs) && r.prs.length>0);
+      default:{
+        const val=r[key];
+        return val==null || String(val).trim()==='';
+      }
+    }
+  }
+
+  function compareRows(a,b,key){
+    switch(key){
+      case 'age_days':
+        return compareNumbers(a&&a.age_days,b&&b.age_days);
+      case 'commit':
+        return compareStrings(a&&a.commit,b&&b.commit);
+      case 'date':
+        return compareStrings(a&&a.date,b&&b.date);
+      case 'author':
+        return compareStrings(a&&a.author,b&&b.author);
+      case 'email':
+        return compareStrings(a&&a.email,b&&b.email);
+      case 'kind':
+        return compareStrings(a&&a.kind,b&&b.kind);
+      case 'comment':
+        return compareStrings(a&&a.comment,b&&b.comment);
+      case 'message':
+        return compareStrings(a&&a.message,b&&b.message);
+      case 'url':
+        return compareStrings(a&&a.url,b&&b.url);
+      case 'location':
+        return compareLocation(a,b);
+      case 'prs':
+        return comparePRs(a,b);
+      default:
+        return compareStrings(a&&a[key],b&&b[key]);
+    }
+  }
+
+  function compareStrings(a,b){
+    const sa=a==null?'':String(a).trim();
+    const sb=b==null?'':String(b).trim();
+    const emptyA=sa==='';
+    const emptyB=sb==='';
+    if(emptyA && emptyB){
+      return 0;
+    }
+    if(emptyA){
+      return 1;
+    }
+    if(emptyB){
+      return -1;
+    }
+    if(sa<sb){return -1;}
+    if(sa>sb){return 1;}
+    return 0;
+  }
+
+  function compareNumbers(a,b){
+    const validA=typeof a==='number' && isFinite(a);
+    const validB=typeof b==='number' && isFinite(b);
+    if(!validA && !validB){
+      return 0;
+    }
+    if(!validA){
+      return 1;
+    }
+    if(!validB){
+      return -1;
+    }
+    if(a<b){return -1;}
+    if(a>b){return 1;}
+    return 0;
+  }
+
+  function compareLocation(a,b){
+    const fileA=a&&a.file!=null?String(a.file).trim():'';
+    const fileB=b&&b.file!=null?String(b.file).trim():'';
+    const rawLineA=a&&typeof a.line==='number'&&a.line>0?a.line:NaN;
+    const rawLineB=b&&typeof b.line==='number'&&b.line>0?b.line:NaN;
+    const missingA=!fileA && !Number.isFinite(rawLineA);
+    const missingB=!fileB && !Number.isFinite(rawLineB);
+    if(missingA && missingB){
+      return 0;
+    }
+    if(missingA){
+      return 1;
+    }
+    if(missingB){
+      return -1;
+    }
+    if(fileA<fileB){return -1;}
+    if(fileA>fileB){return 1;}
+    const validA=Number.isFinite(rawLineA);
+    const validB=Number.isFinite(rawLineB);
+    if(!validA && !validB){
+      return 0;
+    }
+    if(!validA){
+      return 1;
+    }
+    if(!validB){
+      return -1;
+    }
+    if(rawLineA<rawLineB){return -1;}
+    if(rawLineA>rawLineB){return 1;}
+    return 0;
+  }
+
+  function comparePRs(a,b){
+    const listA=Array.isArray(a&&a.prs)?a.prs:[];
+    const listB=Array.isArray(b&&b.prs)?b.prs:[];
+    if(listA.length===0 && listB.length===0){
+      return 0;
+    }
+    if(listA.length===0){
+      return 1;
+    }
+    if(listB.length===0){
+      return -1;
+    }
+    const firstA=listA[0]||{};
+    const firstB=listB[0]||{};
+    const numA=typeof firstA.number==='number'?firstA.number:Number(firstA.number);
+    const numB=typeof firstB.number==='number'?firstB.number:Number(firstB.number);
+    const hasNumA=Number.isFinite(numA)&&numA>0;
+    const hasNumB=Number.isFinite(numB)&&numB>0;
+    if(hasNumA && hasNumB){
+      if(numA<numB){return -1;}
+      if(numA>numB){return 1;}
+      return 0;
+    }
+    if(hasNumA){
+      return -1;
+    }
+    if(hasNumB){
+      return 1;
+    }
+    const titleCmp=compareStrings(firstA.title,firstB.title);
+    if(titleCmp!==0){
+      return titleCmp;
+    }
+    return compareStrings(firstA.state,firstB.state);
   }
 
   function resetProgressUI(){
@@ -364,9 +645,48 @@
     }
   }
 
+  function renderTableWithSort(){
+    const base=(latestResult&&typeof latestResult==='object')?latestResult:{};
+    const sorted=sortRows(tableRows,sortKey,sortDesc);
+    out.innerHTML=renderResultTable(base,{rows:sorted,sortKey:sortKey,sortDesc:sortDesc});
+    attachSortHandlers();
+  }
+
+  function attachSortHandlers(){
+    const buttons=out.querySelectorAll('th .sort-btn');
+    for(const btn of buttons){
+      btn.addEventListener('click',(ev)=>{
+        ev.preventDefault();
+        const key=btn.getAttribute('data-key');
+        if(!key){
+          return;
+        }
+        if(sortKey===key){
+          sortDesc=!sortDesc;
+        }else{
+          sortKey=key;
+          sortDesc=false;
+        }
+        renderTableWithSort();
+      });
+    }
+  }
+
+  function updateResultData(data){
+    latestResult=(data&&typeof data==='object')?data:null;
+    tableRows=Array.isArray(latestResult&&latestResult.items)?latestResult.items.slice():[];
+    sortKey=null;
+    sortDesc=false;
+    renderTableWithSort();
+  }
+
   async function startScanWithFetch(q){
     hideProgressUI();
     out.innerHTML='';
+    latestResult=null;
+    tableRows=[];
+    sortKey=null;
+    sortDesc=false;
     // フォールバック実行中のキャンセル対応
     fetchAbort = new AbortController();
     const { signal } = fetchAbort;
@@ -394,7 +714,7 @@
           throw new Error('Failed to parse response JSON: '+detail);
         }
       }
-      out.innerHTML=renderResultTable(data);
+      updateResultData(data);
     }catch(err){
       if(err && err.name === 'AbortError'){
         // キャンセル時は静かに終了
@@ -410,6 +730,10 @@
   function startScanWithSSE(q){
     closeStream();
     out.innerHTML='';
+    latestResult=null;
+    tableRows=[];
+    sortKey=null;
+    sortDesc=false;
     showProgressUI();
     try{
       es=new EventSource('/api/scan/stream?'+q.toString());
@@ -432,7 +756,7 @@
       try{
         const res=JSON.parse(ev.data);
         hideProgressUI();
-        out.innerHTML=renderResultTable(res);
+        updateResultData(res);
       }catch(parseErr){
         console.error(parseErr);
         showError(parseErr instanceof Error?parseErr.message:String(parseErr));

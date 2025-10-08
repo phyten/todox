@@ -110,6 +110,50 @@ td {
   vertical-align: top;
 }
 
+th {
+  text-align: left;
+}
+
+.sort-btn {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font: inherit;
+}
+
+th .sort-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.sort-btn:hover {
+  color: var(--link);
+}
+
+.sort-btn:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.sort-btn::after {
+  content: '';
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sort-btn.asc::after {
+  content: '▲';
+}
+
+.sort-btn.desc::after {
+  content: '▼';
+}
+
 thead {
   position: sticky;
   top: 0;
