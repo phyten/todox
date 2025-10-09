@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"github.com/phyten/todox/internal/config"
 	"github.com/phyten/todox/internal/engine"
 	engineopts "github.com/phyten/todox/internal/engine/opts"
 	"github.com/phyten/todox/internal/execx"
@@ -97,7 +98,8 @@ func (u *usageError) Unwrap() error {
 }
 
 type multiFlag struct {
-	values []string
+	values  []string
+	changed bool
 }
 
 func (m *multiFlag) String() string {
@@ -108,7 +110,10 @@ func (m *multiFlag) String() string {
 }
 
 func (m *multiFlag) Set(value string) error {
+	// 空文字は明示的なクリアとして扱い、既存値を全て削除する
 	if value == "" {
+		m.values = m.values[:0]
+		m.changed = true
 		return nil
 	}
 	for _, piece := range strings.Split(value, ",") {
@@ -118,6 +123,7 @@ func (m *multiFlag) Set(value string) error {
 		}
 		m.values = append(m.values, trimmed)
 	}
+	m.changed = true
 	return nil
 }
 
@@ -128,6 +134,13 @@ func (m *multiFlag) Slice() []string {
 	out := make([]string, len(m.values))
 	copy(out, m.values)
 	return out
+}
+
+func (m *multiFlag) WasSet() bool {
+	if m == nil {
+		return false
+	}
+	return m.changed
 }
 
 func warnDeprecatedWithLink() {
@@ -149,76 +162,80 @@ func deprecatedWarningsSuppressed() bool {
 	}
 }
 
-func canonicalizePRState(raw string) (string, error) {
-	state := strings.ToLower(strings.TrimSpace(raw))
-	if state == "" || state == "all" {
-		return "all", nil
-	}
-	switch state {
-	case "open", "closed", "merged":
-		return state, nil
-	default:
-		return "", fmt.Errorf("invalid --pr-state: %s", raw)
-	}
-}
-
-func canonicalizePRPrefer(raw string) (string, error) {
-	prefer := strings.ToLower(strings.TrimSpace(raw))
-	if prefer == "" {
-		return "open", nil
-	}
-	switch prefer {
-	case "open", "merged", "closed", "none":
-		return prefer, nil
-	default:
-		return "", fmt.Errorf("invalid --pr-prefer: %s", raw)
-	}
-}
-
 func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	cfg := scanConfig{helpLang: strings.ToLower(envLang)}
 	if cfg.helpLang == "" {
 		cfg.helpLang = "en"
 	}
 
+	envCfg, err := config.FromEnv(os.Getenv)
+	if err != nil {
+		return cfg, &usageError{err: err}
+	}
+
+	repoGuess := guessRepoDir(args, envCfg)
+	configPath, _, err := config.Find(repoGuess, os.Getenv("TODOX_CONFIG"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("HOME"))
+	if err != nil {
+		return cfg, err
+	}
+	fileCfg, err := config.Load(configPath)
+	if err != nil {
+		return cfg, err
+	}
+
+	baseOpts := engineopts.Defaults(repoGuess)
+	baseEngine := config.EngineSettingsFromOptions(baseOpts)
+	baseUI := config.DefaultUISettings()
+
+	defaultsEngine := config.MergeEngine(baseEngine, fileCfg.Engine, envCfg.Engine)
+	defaultsUI := config.MergeUI(baseUI, fileCfg.UI, envCfg.UI)
+	defaultsUI, err = config.NormalizeUI(defaultsUI)
+	if err != nil {
+		return cfg, &usageError{err: err}
+	}
+	normalizedOutput, err := engineopts.NormalizeOutput(defaultsEngine.Output)
+	if err != nil {
+		return cfg, &usageError{err: err}
+	}
+	defaultsEngine.Output = normalizedOutput
+
 	fs := flag.NewFlagSet("todox", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	typ := fs.String("type", "both", "todo|fixme|both")
-	mode := fs.String("mode", "last", "last|first")
-	author := fs.String("author", "", "filter by author name/email (regexp)")
-	output := fs.String("output", "table", "table|tsv|json")
-	colorMode := fs.String("color", "auto", "color output for tables: auto|always|never")
-	withComment := fs.Bool("with-comment", false, "show line text (from TODO/FIXME)")
-	withMessage := fs.Bool("with-message", false, "show commit subject (1st line)")
-	withAge := fs.Bool("with-age", false, "show AGE column (table/tsv)")
-	withCommitLink := fs.Bool("with-commit-link", false, "show URL column (GitHub blob link)")
+	typ := fs.String("type", defaultsEngine.Type, "todo|fixme|both")
+	mode := fs.String("mode", defaultsEngine.Mode, "last|first")
+	author := fs.String("author", defaultsEngine.Author, "filter by author name/email (regexp)")
+	output := fs.String("output", defaultsEngine.Output, "table|tsv|json")
+	colorMode := fs.String("color", defaultsEngine.Color, "color output for tables: auto|always|never")
+	withComment := fs.Bool("with-comment", defaultsEngine.WithComment, "show line text (from TODO/FIXME)")
+	withMessage := fs.Bool("with-message", defaultsEngine.WithMessage, "show commit subject (1st line)")
+	withAge := fs.Bool("with-age", defaultsUI.WithAge, "show AGE column (table/tsv)")
+	withCommitLink := fs.Bool("with-commit-link", defaultsUI.WithCommitLink, "show URL column (GitHub blob link)")
 	withLinkAlias := fs.Bool("with-link", false, "DEPRECATED: alias of --with-commit-link")
-	withPRLinks := fs.Bool("with-pr-links", false, "include pull request links (table/tsv/JSON)")
-	prState := fs.String("pr-state", "all", "filter PRs by state: all|open|closed|merged")
-	prLimit := fs.Int("pr-limit", 3, "maximum PRs to include per item (1-20)")
-	prPrefer := fs.String("pr-prefer", "open", "state preference when ordering PRs: open|merged|closed|none")
-	fields := fs.String("fields", "", "comma-separated columns for table/tsv (overrides --with-*)")
+	withPRLinks := fs.Bool("with-pr-links", defaultsUI.WithPRLinks, "include pull request links (table/tsv/JSON)")
+	prState := fs.String("pr-state", defaultsUI.PRState, "filter PRs by state: all|open|closed|merged")
+	prLimit := fs.Int("pr-limit", defaultsUI.PRLimit, "maximum PRs to include per item (1-20)")
+	prPrefer := fs.String("pr-prefer", defaultsUI.PRPrefer, "state preference when ordering PRs: open|merged|closed|none")
+	fields := fs.String("fields", defaultsUI.Fields, "comma-separated columns for table/tsv (overrides --with-*)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
-	truncAll := fs.Int("truncate", 0, "truncate comment/message to N runes (0=unlimited)")
-	truncComment := fs.Int("truncate-comment", 0, "truncate comment only (0=unlimited)")
-	truncMessage := fs.Int("truncate-message", 0, "truncate message only (0=unlimited)")
-	noIgnoreWS := fs.Bool("no-ignore-ws", false, "include whitespace-only changes in blame")
+	truncAll := fs.Int("truncate", defaultsEngine.TruncAll, "truncate comment/message to N runes (0=unlimited)")
+	truncComment := fs.Int("truncate-comment", defaultsEngine.TruncComment, "truncate comment only (0=unlimited)")
+	truncMessage := fs.Int("truncate-message", defaultsEngine.TruncMessage, "truncate message only (0=unlimited)")
+	noIgnoreWS := fs.Bool("no-ignore-ws", !defaultsEngine.IgnoreWS, "include whitespace-only changes in blame")
 	noProgress := fs.Bool("no-progress", false, "disable progress/ETA")
 	forceProg := fs.Bool("progress", false, "force progress even when piped")
-	sortKey := fs.String("sort", "", "sort order (e.g. author,-date; default: file,line)")
+	sortKey := fs.String("sort", defaultsUI.Sort, "sort order (e.g. author,-date; default: file,line)")
 	lang := fs.String("lang", "", "help language (en|ja)")
-	jobsDefault := engineopts.Defaults(".").Jobs
-	jobs := fs.Int("jobs", jobsDefault, "max parallel workers")
-	repo := fs.String("repo", ".", "repo root (default: current dir)")
+	jobs := fs.Int("jobs", defaultsEngine.Jobs, "max parallel workers")
+	repo := fs.String("repo", defaultsEngine.Repo, "repo root (default: current dir)")
 	var paths multiFlag
 	var excludes multiFlag
 	var pathRegex multiFlag
 	fs.Var(&paths, "path", "limit search to given pathspec(s). repeatable / CSV")
 	fs.Var(&excludes, "exclude", "exclude pathspec/glob(s). repeatable / CSV")
 	fs.Var(&pathRegex, "path-regex", "post-filter files by Go regexp (OR). repeatable / CSV")
-	excludeTypical := fs.Bool("exclude-typical", false, "apply typical excludes (vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*)")
+	excludeTypical := fs.Bool("exclude-typical", defaultsEngine.ExcludeTypical, "apply typical excludes (vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*)")
 
 	shortMap := map[string]string{
 		"-t": "--type",
@@ -276,13 +293,18 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		}
 	}
 
-	if err := fs.Parse(normalized); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	if parseErr := fs.Parse(normalized); parseErr != nil {
+		if errors.Is(parseErr, flag.ErrHelp) {
 			cfg.showHelp = true
 			return cfg, nil
 		}
-		return cfg, err
+		return cfg, parseErr
 	}
+
+	flagWasSet := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) {
+		flagWasSet[f.Name] = true
+	})
 
 	if *full {
 		if !*withComment {
@@ -307,65 +329,210 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		cfg.helpLang = "en"
 	}
 
-	cfg.opts = engineopts.Defaults(*repo)
-	cfg.opts.Type = *typ
-	cfg.opts.Mode = *mode
-	cfg.opts.AuthorRegex = *author
-	cfg.opts.WithComment = *withComment
-	cfg.opts.WithMessage = *withMessage
-	cfg.opts.TruncAll = *truncAll
-	cfg.opts.TruncComment = *truncComment
-	cfg.opts.TruncMessage = *truncMessage
-	cfg.opts.IgnoreWS = !*noIgnoreWS
-	cfg.opts.Jobs = *jobs
-	cfg.opts.RepoDir = *repo
-	cfg.opts.Progress = progress.ShouldShowProgress(*forceProg, *noProgress)
-	cfg.opts.Paths = paths.Slice()
-	cfg.opts.Excludes = excludes.Slice()
-	cfg.opts.PathRegex = pathRegex.Slice()
-	cfg.opts.ExcludeTypical = *excludeTypical
+	truncAllChanged := flagWasSet["truncate"]
+	truncCommentChanged := flagWasSet["truncate-comment"]
+	truncMessageChanged := flagWasSet["truncate-message"]
+	if *full && *truncAll == 120 && !truncAllChanged {
+		truncAllChanged = true
+	}
 
-	normalizedOutput, err := engineopts.NormalizeOutput(*output)
+	withCommentChanged := flagWasSet["with-comment"]
+	withMessageChanged := flagWasSet["with-message"]
+	if *withSnippet {
+		*withComment = true
+		withCommentChanged = true
+	}
+	if *full {
+		withCommentChanged = true
+		withMessageChanged = true
+	}
+
+	var flagEngine config.EngineConfig
+	if flagWasSet["type"] {
+		v := *typ
+		flagEngine.Type = &v
+	}
+	if flagWasSet["mode"] {
+		v := *mode
+		flagEngine.Mode = &v
+	}
+	if flagWasSet["author"] {
+		v := *author
+		flagEngine.Author = &v
+	}
+	if paths.WasSet() {
+		vals := paths.Slice()
+		flagEngine.Paths = &vals
+	}
+	if excludes.WasSet() {
+		vals := excludes.Slice()
+		flagEngine.Excludes = &vals
+	}
+	if pathRegex.WasSet() {
+		vals := pathRegex.Slice()
+		flagEngine.PathRegex = &vals
+	}
+	if flagWasSet["exclude-typical"] {
+		v := *excludeTypical
+		flagEngine.ExcludeTypical = &v
+	}
+	if withCommentChanged {
+		v := *withComment
+		flagEngine.WithComment = &v
+	}
+	if withMessageChanged {
+		v := *withMessage
+		flagEngine.WithMessage = &v
+	}
+	if truncAllChanged {
+		v := *truncAll
+		flagEngine.TruncAll = &v
+	}
+	if truncCommentChanged {
+		v := *truncComment
+		flagEngine.TruncComment = &v
+	}
+	if truncMessageChanged {
+		v := *truncMessage
+		flagEngine.TruncMessage = &v
+	}
+	if flagWasSet["no-ignore-ws"] {
+		v := !*noIgnoreWS
+		flagEngine.IgnoreWS = &v
+	}
+	if flagWasSet["jobs"] {
+		v := *jobs
+		flagEngine.Jobs = &v
+	}
+	if flagWasSet["repo"] {
+		v := *repo
+		flagEngine.Repo = &v
+	}
+	if flagWasSet["output"] {
+		v := *output
+		flagEngine.Output = &v
+	}
+	if flagWasSet["color"] {
+		v := *colorMode
+		flagEngine.Color = &v
+	}
+
+	var flagUI config.UIConfig
+	if flagWasSet["with-age"] {
+		v := *withAge
+		flagUI.WithAge = &v
+	}
+	if flagWasSet["with-commit-link"] {
+		v := *withCommitLink
+		flagUI.WithCommitLink = &v
+	}
+	if flagWasSet["with-link"] && !flagWasSet["with-commit-link"] {
+		v := *withLinkAlias
+		flagUI.WithCommitLink = &v
+	}
+	if flagWasSet["with-pr-links"] {
+		v := *withPRLinks
+		flagUI.WithPRLinks = &v
+	}
+	if flagWasSet["pr-state"] {
+		v := *prState
+		flagUI.PRState = &v
+	}
+	if flagWasSet["pr-limit"] {
+		v := *prLimit
+		flagUI.PRLimit = &v
+	}
+	if flagWasSet["pr-prefer"] {
+		v := *prPrefer
+		flagUI.PRPrefer = &v
+	}
+	if flagWasSet["fields"] {
+		v := *fields
+		flagUI.Fields = &v
+	}
+	if flagWasSet["sort"] {
+		v := *sortKey
+		flagUI.Sort = &v
+	}
+
+	finalEngine := config.MergeEngine(defaultsEngine, flagEngine)
+	finalUI := config.MergeUI(defaultsUI, flagUI)
+	finalUI, err = config.NormalizeUI(finalUI)
 	if err != nil {
-		return cfg, err
+		return cfg, &usageError{err: err}
 	}
-	cfg.output = normalizedOutput
-	cfg.withComment = *withComment
-	cfg.withMessage = *withMessage
-	cfg.withAge = *withAge
-	cfg.withCommit = *withCommitLink || *withLinkAlias
-	cfg.withPRs = *withPRLinks
-	cfg.sortKey = *sortKey
-	cfg.fields = *fields
 
-	state, stateErr := canonicalizePRState(*prState)
-	if stateErr != nil {
-		return cfg, &usageError{err: stateErr}
+	normalizedOutput, err = engineopts.NormalizeOutput(finalEngine.Output)
+	if err != nil {
+		return cfg, &usageError{err: err}
 	}
-	cfg.prState = state
+	finalEngine.Output = normalizedOutput
 
-	if *prLimit < 1 || *prLimit > 20 {
-		return cfg, &usageError{err: fmt.Errorf("--pr-limit must be between 1 and 20")}
-	}
-	cfg.prLimit = *prLimit
+	opts := engineopts.Defaults(finalEngine.Repo)
+	finalEngine.ApplyToOptions(&opts)
+	opts.Progress = progress.ShouldShowProgress(*forceProg, *noProgress)
 
-	prefer, preferErr := canonicalizePRPrefer(*prPrefer)
-	if preferErr != nil {
-		return cfg, &usageError{err: preferErr}
-	}
-	cfg.prPrefer = prefer
+	cfg.opts = opts
+	cfg.output = finalEngine.Output
+	cfg.withComment = finalEngine.WithComment
+	cfg.withMessage = finalEngine.WithMessage
+	cfg.withAge = finalUI.WithAge
+	cfg.withCommit = finalUI.WithCommitLink
+	cfg.withPRs = finalUI.WithPRLinks
+	cfg.sortKey = finalUI.Sort
+	cfg.fields = finalUI.Fields
+	cfg.prState = finalUI.PRState
+	cfg.prLimit = finalUI.PRLimit
+	cfg.prPrefer = finalUI.PRPrefer
 
-	if *withLinkAlias {
+	if flagWasSet["with-link"] {
 		warnDeprecatedWithLink()
 	}
 
-	parsedMode, err := termcolor.ParseMode(*colorMode)
+	parsedMode, err := termcolor.ParseMode(finalEngine.Color)
 	if err != nil {
 		return cfg, &usageError{err: err}
 	}
 	cfg.colorMode = parsedMode
 
+	if err := engineopts.NormalizeAndValidate(&cfg.opts); err != nil {
+		return cfg, err
+	}
+
 	return cfg, nil
+}
+
+func guessRepoDir(args []string, envCfg config.Config) string {
+	repo := "."
+	if envCfg.Engine.Repo != nil {
+		trimmed := strings.TrimSpace(*envCfg.Engine.Repo)
+		if trimmed != "" {
+			repo = trimmed
+		}
+	}
+	if v, ok := findFlagValue(args, "--repo"); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			repo = trimmed
+		}
+	}
+	return repo
+}
+
+func findFlagValue(args []string, name string) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == name {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
+		}
+		if strings.HasPrefix(arg, name+"=") {
+			return arg[len(name)+1:], true
+		}
+	}
+	return "", false
 }
 
 func scanCmd(args []string) {
@@ -709,13 +876,38 @@ type scanInputs struct {
 }
 
 func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
-	options := engineopts.Defaults(repoDir)
-	options, err := engineopts.ApplyWebQueryToOptions(options, q)
+	envCfg, err := config.FromEnv(os.Getenv)
 	if err != nil {
 		return scanInputs{}, err
 	}
 
-	withAge := false
+	configPath, _, err := config.Find(repoDir, os.Getenv("TODOX_CONFIG"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("HOME"))
+	if err != nil {
+		return scanInputs{}, err
+	}
+	fileCfg, err := config.Load(configPath)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	baseOpts := engineopts.Defaults(repoDir)
+	baseEngine := config.EngineSettingsFromOptions(baseOpts)
+	mergedEngine := config.MergeEngine(baseEngine, fileCfg.Engine, envCfg.Engine)
+	mergedEngine.ApplyToOptions(&baseOpts)
+
+	baseUI := config.DefaultUISettings()
+	mergedUI := config.MergeUI(baseUI, fileCfg.UI, envCfg.UI)
+	mergedUI, err = config.NormalizeUI(mergedUI)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	options, err := engineopts.ApplyWebQueryToOptions(baseOpts, q)
+	if err != nil {
+		return scanInputs{}, err
+	}
+
+	withAge := mergedUI.WithAge
 	if vals := engineopts.SplitMulti(q["with_age"]); len(vals) > 0 {
 		raw := vals[len(vals)-1]
 		v, parseErr := engineopts.ParseBool(raw, "with_age")
@@ -725,7 +917,7 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		withAge = v
 	}
 
-	withCommit := false
+	withCommit := mergedUI.WithCommitLink
 	if vals := engineopts.SplitMulti(q["with_commit_link"]); len(vals) > 0 {
 		raw := vals[len(vals)-1]
 		v, parseErr := engineopts.ParseBool(raw, "with_commit_link")
@@ -742,7 +934,7 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		withCommit = v
 	}
 
-	withPRs := false
+	withPRs := mergedUI.WithPRLinks
 	if vals := engineopts.SplitMulti(q["with_pr_links"]); len(vals) > 0 {
 		raw := vals[len(vals)-1]
 		v, parseErr := engineopts.ParseBool(raw, "with_pr_links")
@@ -752,16 +944,16 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		withPRs = v
 	}
 
-	prState := "all"
+	prState := mergedUI.PRState
 	if vals := engineopts.SplitMulti(q["pr_state"]); len(vals) > 0 {
-		state, stateErr := canonicalizePRState(vals[len(vals)-1])
+		state, stateErr := config.CanonicalizePRState(vals[len(vals)-1])
 		if stateErr != nil {
 			return scanInputs{}, stateErr
 		}
 		prState = state
 	}
 
-	prLimit := 3
+	prLimit := mergedUI.PRLimit
 	if vals := engineopts.SplitMulti(q["pr_limit"]); len(vals) > 0 {
 		raw := vals[len(vals)-1]
 		limit, parseErr := engineopts.ParseIntInRange(raw, "pr_limit", 1, 20)
@@ -771,17 +963,20 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		prLimit = limit
 	}
 
-	prPrefer := "open"
+	prPrefer := mergedUI.PRPrefer
 	if vals := engineopts.SplitMulti(q["pr_prefer"]); len(vals) > 0 {
-		prefer, preferErr := canonicalizePRPrefer(vals[len(vals)-1])
+		prefer, preferErr := config.CanonicalizePRPrefer(vals[len(vals)-1])
 		if preferErr != nil {
 			return scanInputs{}, preferErr
 		}
 		prPrefer = prefer
 	}
 
-	fieldsParam := strings.Join(engineopts.SplitMulti(q["fields"]), ",")
-	sortParam := ""
+	fieldsParam := mergedUI.Fields
+	if joined := strings.Join(engineopts.SplitMulti(q["fields"]), ","); strings.TrimSpace(joined) != "" {
+		fieldsParam = joined
+	}
+	sortParam := mergedUI.Sort
 	if rawSort := q["sort"]; len(rawSort) > 0 {
 		sortParam = strings.TrimSpace(rawSort[len(rawSort)-1])
 	}

@@ -6,9 +6,11 @@ require (
 	github.com/chromedp/chromedp v0.10.1
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
 	github.com/mattn/go-runewidth v0.0.17
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/term v0.26.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

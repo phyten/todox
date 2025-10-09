@@ -88,6 +88,70 @@ The embedded CSS honours `prefers-color-scheme` so light/dark mode follows the O
 
 ---
 
+## Configuration
+
+`todox` reads optional `.todox.yaml` / `.todox.toml` / `.todox.json` files and applies their values before command-line flags. The search order is:
+
+1. `TODOX_CONFIG=/abs/path/to/file` (if present)
+2. The repository root (`--repo` or `.`) and its parents
+3. `$XDG_CONFIG_HOME/todox/config.{yaml,toml,json}`
+4. `$HOME/.todox.{yaml,toml,json}`
+
+The first file found wins; there is no multi-level merge. Final values are resolved with the following precedence: **CLI flags > `TODOX_*` environment variables > config file > built-in defaults**. Both the CLI and the web server share the same resolution logic.
+
+> If a key appears both at the **top level** and under `engine:`/`ui:`, the top-level value takes precedence (mixing scopes is discouraged).
+
+Example `.todox.yaml`:
+
+```yaml
+type: fixme
+paths:
+  - internal
+  - cmd
+with_comment: true
+with_pr_links: true
+ui:
+  pr_state: open
+  pr_limit: 5
+  sort: -age
+```
+
+Scalar and list fields accept either a single string (`path: src`) or an array (`path: ["src", "cmd"]`). Booleans use the same syntax as CLI flags (`true`, `false`, `1`, `0`, `yes`, `no`, ...).
+
+Frequently used environment variables (all prefixed with `TODOX_`):
+
+| Setting | Environment variable | Example |
+| --- | --- | --- |
+| `type` | `TODOX_TYPE` | `fixme` |
+| `mode` | `TODOX_MODE` | `first` |
+| `author` | `TODOX_AUTHOR` | `alice@example.com` |
+| `paths` | `TODOX_PATH` | `src,cmd` |
+| `path_regex` | `TODOX_PATH_REGEX` | `.*\.go$` |
+| `excludes` | `TODOX_EXCLUDE` | `vendor/**,dist/**` |
+| `exclude_typical` | `TODOX_EXCLUDE_TYPICAL` | `true` |
+| `with_comment` | `TODOX_WITH_COMMENT` | `true` |
+| `with_message` | `TODOX_WITH_MESSAGE` | `1` |
+| `ignore_ws` | `TODOX_IGNORE_WS` | `false` |
+| `with_age` | `TODOX_WITH_AGE` | `yes` |
+| `with_commit_link` | `TODOX_WITH_COMMIT_LINK` | `true` |
+| `with_pr_links` | `TODOX_WITH_PR_LINKS` | `true` |
+| `pr_state` | `TODOX_PR_STATE` | `merged` |
+| `pr_prefer` | `TODOX_PR_PREFER` | `open` |
+| `pr_limit` | `TODOX_PR_LIMIT` | `5` |
+| `fields` | `TODOX_FIELDS` | `type,author,date` |
+| `sort` | `TODOX_SORT` | `-age,file` |
+| `truncate` | `TODOX_TRUNCATE` | `120` |
+| `truncate_comment` | `TODOX_TRUNCATE_COMMENT` | `80` |
+| `truncate_message` | `TODOX_TRUNCATE_MESSAGE` | `72` |
+| `output` | `TODOX_OUTPUT` | `json` |
+| `color` | `TODOX_COLOR` | `never` |
+| `jobs` | `TODOX_JOBS` | `8` |
+| `repo` | `TODOX_REPO` | `/path/to/repo` |
+
+Unset variables simply fall back to the config file (or built-in) defaults. Invalid values are rejected with the same error messages as their CLI counterparts.
+
+---
+
 ## Dev Container (recommended development setup)
 
 The provided Dev Container gives you a reproducible environment.
