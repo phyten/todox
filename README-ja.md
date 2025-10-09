@@ -89,6 +89,70 @@ SSE (`EventSource`) に対応したブラウザでは `/api/scan/stream` に接�
 
 ---
 
+## 設定ファイル
+
+`.todox.yaml` / `.todox.toml` / `.todox.json` を用意すると、CLI フラグより先に既定値として読み込まれます。探索順は次のとおりです。
+
+1. `TODOX_CONFIG=/abs/path/to/file` が指定されていればそのファイル
+2. リポジトリルート（`--repo` 指定があればそのディレクトリ）と親ディレクトリ
+3. `$XDG_CONFIG_HOME/todox/config.{yaml,toml,json}`
+4. `$HOME/.todox.{yaml,toml,json}`
+
+最初に見つかった 1 件のみを使用します。優先順位は **CLI フラグ > `TODOX_*` 環境変数 > 設定ファイル > 組み込み既定値** です。CLI / Web どちらも同じ順序で解決されます。
+
+> 同じキーが **トップレベル** と `engine:` / `ui:` の両方に存在する場合は、トップレベルの値が優先されます（混在は非推奨です）。
+
+`.todox.yaml` の例:
+
+```yaml
+type: fixme
+paths:
+  - internal
+  - cmd
+with_comment: true
+with_pr_links: true
+ui:
+  pr_state: open
+  pr_limit: 5
+  sort: -age
+```
+
+配列系の項目は単一文字列（`path: src`）でも配列（`path: ["src", "cmd"]`）でも指定できます。真偽値は CLI と同じく `true/false`、`1/0`、`yes/no` などが使用できます。
+
+主な環境変数（すべて `TODOX_` プレフィクス付き）:
+
+| 設定 | 環境変数 | 例 |
+| --- | --- | --- |
+| `type` | `TODOX_TYPE` | `fixme` |
+| `mode` | `TODOX_MODE` | `first` |
+| `author` | `TODOX_AUTHOR` | `alice@example.com` |
+| `paths` | `TODOX_PATH` | `src,cmd` |
+| `path_regex` | `TODOX_PATH_REGEX` | `.*\.go$` |
+| `excludes` | `TODOX_EXCLUDE` | `vendor/**,dist/**` |
+| `exclude_typical` | `TODOX_EXCLUDE_TYPICAL` | `true` |
+| `with_comment` | `TODOX_WITH_COMMENT` | `true` |
+| `with_message` | `TODOX_WITH_MESSAGE` | `1` |
+| `ignore_ws` | `TODOX_IGNORE_WS` | `false` |
+| `with_age` | `TODOX_WITH_AGE` | `yes` |
+| `with_commit_link` | `TODOX_WITH_COMMIT_LINK` | `true` |
+| `with_pr_links` | `TODOX_WITH_PR_LINKS` | `true` |
+| `pr_state` | `TODOX_PR_STATE` | `merged` |
+| `pr_prefer` | `TODOX_PR_PREFER` | `open` |
+| `pr_limit` | `TODOX_PR_LIMIT` | `5` |
+| `fields` | `TODOX_FIELDS` | `type,author,date` |
+| `sort` | `TODOX_SORT` | `-age,file` |
+| `truncate` | `TODOX_TRUNCATE` | `120` |
+| `truncate_comment` | `TODOX_TRUNCATE_COMMENT` | `80` |
+| `truncate_message` | `TODOX_TRUNCATE_MESSAGE` | `72` |
+| `output` | `TODOX_OUTPUT` | `json` |
+| `color` | `TODOX_COLOR` | `never` |
+| `jobs` | `TODOX_JOBS` | `8` |
+| `repo` | `TODOX_REPO` | `/path/to/repo` |
+
+未設定の項目は設定ファイル → 内蔵既定値の順にフォールバックします。無効な値は CLI と同じエラーメッセージで拒否されます。
+
+---
+
 ## Dev Container（推奨の開発環境）
 
 Dev Containers CLI を使ってリポジトリを再現性高く立ち上げられます。
