@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -17,16 +15,46 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phyten/todox/internal/model"
 	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/textutil"
 )
 
 var reLine = regexp.MustCompile(`:(\d+):`) // first :<num>:
+var defaultTags = []string{"TODO", "FIXME"}
 
 type match struct {
 	file string
 	line int
 	text string
+}
+
+func normalizeSpan(span model.Span) model.Span {
+	out := span
+	if out.StartLine <= 0 {
+		switch {
+		case out.EndLine > 0:
+			out.StartLine = out.EndLine
+		default:
+			out.StartLine = 1
+		}
+	}
+	if out.EndLine <= 0 {
+		out.EndLine = out.StartLine
+	}
+	if out.StartCol <= 0 {
+		out.StartCol = 1
+	}
+	if out.EndCol <= 0 || out.EndCol < out.StartCol {
+		out.EndCol = out.StartCol
+	}
+	if out.ByteStart < 0 {
+		out.ByteStart = 0
+	}
+	if out.ByteEnd < out.ByteStart {
+		out.ByteEnd = out.ByteStart
+	}
+	return out
 }
 
 // Run は指定されたオプションに従ってリポジトリを走査し、TODO/FIXME の一覧とメタデータを返します。
@@ -43,21 +71,29 @@ func Run(opts Options) (*Result, error) {
 	if opts.Jobs <= 0 {
 		opts.Jobs = runtime.NumCPU()
 	}
-	grepPat := "(TODO|FIXME)"
+	tags := effectiveTags(opts.Tags)
+	var searchTags []string
 	switch strings.ToLower(opts.Type) {
 	case "todo":
-		grepPat = "TODO"
+		filtered := filterTagsByType(tags, "TODO")
+		if len(filtered) == 0 {
+			searchTags = []string{"TODO"}
+		} else {
+			searchTags = filtered
+		}
 	case "fixme":
-		grepPat = "FIXME"
-	case "both":
+		filtered := filterTagsByType(tags, "FIXME")
+		if len(filtered) == 0 {
+			searchTags = []string{"FIXME"}
+		} else {
+			searchTags = filtered
+		}
+	case "", "both":
+		searchTags = tags
 	default:
 		return nil, fmt.Errorf("invalid --type: %s", opts.Type)
 	}
 
-	matches, err := gitGrep(opts.RepoDir, grepPat, opts.Paths, opts.Excludes, opts.ExcludeTypical)
-	if err != nil {
-		return nil, err
-	}
 	rx := opts.PathRegexCompiled
 	if len(rx) == 0 && len(opts.PathRegex) > 0 {
 		compiled, compileErr := CompilePathRegex(opts.PathRegex)
@@ -66,28 +102,33 @@ func Run(opts Options) (*Result, error) {
 		}
 		rx = compiled
 	}
-	matches = filterByPathRegex(matches, rx)
-	if len(matches) == 0 {
-		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, Total: 0, ElapsedMS: msSince(start)}, nil
+	opts.PathRegexCompiled = rx
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	modelMatches, detectErrs, err := collectMatches(ctx, opts, searchTags)
+	if err != nil {
+		return nil, err
+	}
+	if len(modelMatches) == 0 {
+		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, Total: 0, ElapsedMS: msSince(start), Errors: detectErrs, ErrorCount: len(detectErrs)}, nil
 	}
 
-	// filter by TYPE precisely (for lines containing both)
-	if opts.Type == "todo" || opts.Type == "fixme" {
-		filter := matches[:0]
-		for _, m := range matches {
-			hasTODO := strings.Contains(m.text, "TODO")
-			hasFIX := strings.Contains(m.text, "FIXME")
-			if opts.Type == "todo" && hasTODO {
-				filter = append(filter, m)
-			}
-			if opts.Type == "fixme" && hasFIX {
-				filter = append(filter, m)
-			}
-		}
-		matches = filter
+	normalized := normalizedTags(tags)
+	switch opts.Type {
+	case "todo":
+		todoTags := normalizedTagsForType(normalized, "TODO")
+		modelMatches = filterModelMatchesByTags(modelMatches, todoTags, []string{"TODO"})
+	case "fixme":
+		fixmeTags := normalizedTagsForType(normalized, "FIXME")
+		modelMatches = filterModelMatchesByTags(modelMatches, fixmeTags, []string{"FIXME"})
+	}
+	if len(modelMatches) == 0 {
+		return &Result{Items: nil, HasComment: opts.WithComment, HasMessage: opts.WithMessage, Total: 0, ElapsedMS: msSince(start), Errors: detectErrs, ErrorCount: len(detectErrs)}, nil
 	}
 
-	out := make([]Item, len(matches))
+	out := make([]Item, len(modelMatches))
 
 	var observers []progress.Observer
 	if opts.ProgressObserver != nil {
@@ -97,20 +138,17 @@ func Run(opts Options) (*Result, error) {
 		observers = append(observers, progress.NewAutoObserver(os.Stderr))
 	}
 	observer := progress.NewMultiObserver(observers...)
-	estimator := progress.NewEstimator(len(matches), progress.Config{})
+	estimator := progress.NewEstimator(len(modelMatches), progress.Config{})
 	if snap, changed := estimator.Stage(progress.StageAttr); changed {
 		observer.Publish(snap)
 	}
 	var errsMu sync.Mutex
-	var errs []ItemError
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	errs := append([]ItemError(nil), detectErrs...)
 
 	// worker pool
 	type job struct {
 		idx int
-		m   match
+		m   model.Match
 	}
 	jobs := make(chan job)
 	var wg sync.WaitGroup
@@ -132,10 +170,8 @@ func Run(opts Options) (*Result, error) {
 				errs = append(errs, itemErrs...)
 				errsMu.Unlock()
 			}
-			// author filter (name or email)
 			if authorRe != nil && item.Commit != "" {
 				if !authorRe.MatchString(item.Author) && !authorRe.MatchString(item.Email) {
-					// mark as skipped by empty commit
 					item.Commit = ""
 				}
 			}
@@ -154,7 +190,7 @@ func Run(opts Options) (*Result, error) {
 	for i := 0; i < nw; i++ {
 		go worker()
 	}
-	for i, m := range matches {
+	for i, m := range modelMatches {
 		jobs <- job{idx: i, m: m}
 	}
 	close(jobs)
@@ -209,34 +245,41 @@ func newItemError(file string, line int, stage string, err error) ItemError {
 	return ItemError{File: file, Line: line, Stage: stage, Message: msg}
 }
 
-func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) {
+func processOne(ctx context.Context, opts Options, m model.Match) (Item, []ItemError) {
+	span := normalizeSpan(m.Span)
+	line := span.StartLine
 	it := Item{
-		Kind: kindOf(m.text),
-		File: m.file,
-		Line: m.line,
+		Kind:      m.Tag,
+		Tag:       m.Tag,
+		Lang:      m.Lang,
+		MatchKind: string(m.Kind),
+		Text:      m.Text,
+		Span:      span,
+		File:      m.File,
+		Line:      line,
 	}
 	var sha string
 	var errs []ItemError
 
 	if strings.ToLower(opts.Mode) == "first" {
-		firstSHA, err := firstCommitForLine(ctx, opts.RepoDir, m.file, m.line)
+		firstSHA, err := firstCommitForLine(ctx, opts.RepoDir, m.File, line)
 		if err != nil {
-			errs = append(errs, newItemError(m.file, m.line, "git log -L", err))
+			errs = append(errs, newItemError(m.File, line, "git log -L", err))
 		}
 		if firstSHA != "" {
 			sha = firstSHA
 		} else {
-			bl, err := blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+			bl, err := blameSHA(ctx, opts.RepoDir, m.File, line, opts.IgnoreWS)
 			if err != nil {
-				errs = append(errs, newItemError(m.file, m.line, "git blame", err))
+				errs = append(errs, newItemError(m.File, line, "git blame", err))
 				return it, errs
 			}
 			sha = bl
 		}
 	} else {
-		bl, err := blameSHA(ctx, opts.RepoDir, m.file, m.line, opts.IgnoreWS)
+		bl, err := blameSHA(ctx, opts.RepoDir, m.File, line, opts.IgnoreWS)
 		if err != nil {
-			errs = append(errs, newItemError(m.file, m.line, "git blame", err))
+			errs = append(errs, newItemError(m.File, line, "git blame", err))
 			return it, errs
 		}
 		sha = bl
@@ -250,7 +293,7 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 	} else {
 		a, e, d, authorTime, s, err := commitMeta(ctx, opts.RepoDir, sha)
 		if err != nil {
-			errs = append(errs, newItemError(m.file, m.line, "git show", err))
+			errs = append(errs, newItemError(m.File, line, "git show", err))
 		}
 		it.Author, it.Email, it.Date, it.Commit = a, e, d, sha
 		it.AgeDays = ageDays(opts.Now, authorTime)
@@ -260,50 +303,15 @@ func processOne(ctx context.Context, opts Options, m match) (Item, []ItemError) 
 	}
 
 	if opts.WithComment {
-		cr := extractComment(m.text, opts.Type)
-		it.Comment = truncateDisplayWidth(cr, effectiveTrunc(opts.TruncComment, opts.TruncAll))
+		text := strings.TrimSpace(m.Text)
+		comment := extractComment(text, opts.Type, opts.Tags)
+		if strings.TrimSpace(comment) == "" {
+			comment = m.Tag
+		}
+		it.Comment = truncateDisplayWidth(comment, effectiveTrunc(opts.TruncComment, opts.TruncAll))
 	}
 
 	return it, errs
-}
-
-func gitGrep(repo, pattern string, includes, excludes []string, typical bool) ([]match, error) {
-	pathspecs := buildGrepPathspecs(includes, excludes, typical)
-	args := []string{"-c", "core.quotePath=false", "grep", "-nI", "--no-color", "-E", pattern, "--"}
-	args = append(args, pathspecs...)
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repo
-	out, err := cmd.Output()
-	if err != nil {
-		// exit code 1 means "no matches"
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && ee.ExitCode() == 1 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("git grep: %w", err)
-	}
-	var res []match
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	buf := make([]byte, 0, 1024*1024)
-	sc.Buffer(buf, 1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		loc := reLine.FindStringIndex(line)
-		if loc == nil {
-			continue
-		}
-		file := line[:loc[0]]
-		lineStr := line[loc[0]+1 : loc[1]-1]
-		text := line[loc[1]:]
-		n, _ := strconv.Atoi(lineStr)
-		// normalize path to repo-relative
-		file = filepath.ToSlash(file)
-		res = append(res, match{file: file, line: n, text: text})
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("git grep scan: %w", err)
-	}
-	return res, nil
 }
 
 func buildBlameArgs(file string, line int, ignoreWS bool) []string {
@@ -365,48 +373,174 @@ func commitMeta(ctx context.Context, repo, sha string) (author, email, date stri
 	return parts[0], parts[1], parts[2], time.Unix(ts, 0).UTC(), parts[4], nil
 }
 
-func kindOf(text string) string {
-	hasTODO := strings.Contains(text, "TODO")
-	hasFIX := strings.Contains(text, "FIXME")
-	switch {
-	case hasTODO && hasFIX:
-		return "TODO|FIXME"
-	case hasTODO:
-		return "TODO"
-	case hasFIX:
-		return "FIXME"
-	default:
-		return "UNKNOWN"
+func effectiveTags(tags []string) []string {
+	if len(tags) == 0 {
+		return append([]string(nil), defaultTags...)
 	}
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, raw := range tags {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return append([]string(nil), defaultTags...)
+	}
+	return out
 }
 
-func extractComment(text, typ string) string {
-	iT := strings.Index(text, "TODO")
-	iF := strings.Index(text, "FIXME")
-	pos := -1
-	switch strings.ToLower(typ) {
-	case "todo":
-		pos = iT
-	case "fixme":
-		pos = iF
-	default:
-		switch {
-		case iT >= 0 && iF >= 0:
-			if iT < iF {
-				pos = iT
-			} else {
-				pos = iF
-			}
-		case iT >= 0:
-			pos = iT
-		case iF >= 0:
-			pos = iF
+func filterTagsByType(tags []string, target string) []string {
+	normalizedTarget := strings.ToUpper(strings.TrimSpace(target))
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if strings.ToUpper(strings.TrimSpace(tag)) == normalizedTarget {
+			out = append(out, tag)
 		}
 	}
-	if pos < 0 {
-		return text
+	return out
+}
+
+func patternForTags(tags []string) string {
+	effective := effectiveTags(tags)
+	if len(effective) == 1 {
+		return regexp.QuoteMeta(effective[0])
 	}
-	return text[pos:]
+	escaped := make([]string, 0, len(effective))
+	for _, tag := range effective {
+		escaped = append(escaped, regexp.QuoteMeta(tag))
+	}
+	return "(" + strings.Join(escaped, "|") + ")"
+}
+
+func normalizedTags(tags []string) []string {
+	effective := effectiveTags(tags)
+	out := make([]string, 0, len(effective))
+	seen := make(map[string]struct{}, len(effective))
+	for _, tag := range effective {
+		upper := strings.ToUpper(tag)
+		if _, ok := seen[upper]; ok {
+			continue
+		}
+		seen[upper] = struct{}{}
+		out = append(out, upper)
+	}
+	return out
+}
+
+func normalizedTagsForType(normalized []string, target string) []string {
+	want := strings.ToUpper(strings.TrimSpace(target))
+	if want == "" {
+		return nil
+	}
+	out := make([]string, 0, len(normalized))
+	for _, tag := range normalized {
+		if tag == want {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
+func filterModelMatchesByTags(matches []model.Match, include []string, fallback []string) []model.Match {
+	tags := include
+	if len(tags) == 0 {
+		tags = fallback
+	}
+	if len(tags) == 0 {
+		return matches
+	}
+	wanted := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.ToUpper(strings.TrimSpace(tag))
+		if trimmed == "" {
+			continue
+		}
+		wanted[trimmed] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return matches
+	}
+	out := matches[:0]
+	for _, m := range matches {
+		upper := strings.ToUpper(strings.TrimSpace(m.Tag))
+		if _, ok := wanted[upper]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func kindOf(text string, tags []string) string {
+	normalized := normalizedTags(tags)
+	upper := strings.ToUpper(text)
+	found := make([]string, 0, len(normalized))
+	seen := make(map[string]struct{}, len(normalized))
+	for _, tag := range normalized {
+		if strings.Contains(upper, tag) {
+			if _, ok := seen[tag]; ok {
+				continue
+			}
+			seen[tag] = struct{}{}
+			found = append(found, tag)
+		}
+	}
+	if len(found) == 0 {
+		if strings.Contains(upper, "TODO") {
+			found = append(found, "TODO")
+		}
+		if strings.Contains(upper, "FIXME") {
+			found = append(found, "FIXME")
+		}
+	}
+	if len(found) == 0 {
+		return "UNKNOWN"
+	}
+	if len(found) == 1 {
+		return found[0]
+	}
+	return strings.Join(found, "|")
+}
+
+func extractComment(text, typ string, tags []string) string {
+	normalized := normalizedTags(tags)
+	var search []string
+	switch strings.ToLower(typ) {
+	case "todo":
+		search = normalizedTagsForType(normalized, "TODO")
+	case "fixme":
+		search = normalizedTagsForType(normalized, "FIXME")
+	default:
+		search = normalized
+	}
+	if len(search) == 0 {
+		switch strings.ToLower(typ) {
+		case "todo":
+			search = []string{"TODO"}
+		case "fixme":
+			search = []string{"FIXME"}
+		default:
+			search = []string{"TODO", "FIXME"}
+		}
+	}
+	upper := strings.ToUpper(text)
+	pos := -1
+	for _, tag := range search {
+		idx := strings.Index(upper, tag)
+		if idx >= 0 && (pos == -1 || idx < pos) {
+			pos = idx
+		}
+	}
+	if pos >= 0 && pos < len(text) {
+		return text[pos:]
+	}
+	return text
 }
 
 func truncateDisplayWidth(s string, n int) string {

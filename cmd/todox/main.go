@@ -204,11 +204,15 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 
 	typ := fs.String("type", defaultsEngine.Type, "todo|fixme|both")
 	mode := fs.String("mode", defaultsEngine.Mode, "last|first")
+	detect := fs.String("detect", defaultsEngine.Detect, "detection engine: auto|parse|regex")
 	author := fs.String("author", defaultsEngine.Author, "filter by author name/email (regexp)")
 	output := fs.String("output", defaultsEngine.Output, "table|tsv|json")
 	colorMode := fs.String("color", defaultsEngine.Color, "color output for tables: auto|always|never")
 	withComment := fs.Bool("with-comment", defaultsEngine.WithComment, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", defaultsEngine.WithMessage, "show commit subject (1st line)")
+	includeStrings := fs.Bool("include-strings", defaultsEngine.IncludeStrings, "include string literals in detection")
+	commentsOnly := fs.Bool("comments-only", !defaultsEngine.IncludeStrings, "alias of --no-strings")
+	noStrings := fs.Bool("no-strings", !defaultsEngine.IncludeStrings, "alias of --comments-only")
 	withAge := fs.Bool("with-age", defaultsUI.WithAge, "show AGE column (table/tsv)")
 	withCommitLink := fs.Bool("with-commit-link", defaultsUI.WithCommitLink, "show URL column (GitHub blob link)")
 	withLinkAlias := fs.Bool("with-link", false, "DEPRECATED: alias of --with-commit-link")
@@ -232,10 +236,18 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	var paths multiFlag
 	var excludes multiFlag
 	var pathRegex multiFlag
+	var detectLangs multiFlag
+	var tagList multiFlag
 	fs.Var(&paths, "path", "limit search to given pathspec(s). repeatable / CSV")
 	fs.Var(&excludes, "exclude", "exclude pathspec/glob(s). repeatable / CSV")
 	fs.Var(&pathRegex, "path-regex", "post-filter files by Go regexp (OR). repeatable / CSV")
+	fs.Var(&detectLangs, "detect-langs", "limit parser-based detection to languages. repeatable / CSV")
+	fs.Var(&detectLangs, "detect-lang", "alias of --detect-langs")
+	fs.Var(&tagList, "tag", "add or replace detection tags. repeatable / CSV")
+	fs.Var(&tagList, "tags", "alias of --tag")
 	excludeTypical := fs.Bool("exclude-typical", defaultsEngine.ExcludeTypical, "apply typical excludes (vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*)")
+	maxFileBytes := fs.Int("max-file-bytes", defaultsEngine.MaxFileBytes, "skip parser detection for files larger than N bytes (0=unlimited)")
+	noPrefilter := fs.Bool("no-prefilter", defaultsEngine.NoPrefilter, "disable git grep prefilter before parsing")
 
 	shortMap := map[string]string{
 		"-t": "--type",
@@ -293,6 +305,51 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		}
 	}
 
+	parseBoolFlag := func(arg, name string) (value bool, matched bool, ok bool) {
+		if arg == name {
+			return true, true, true
+		}
+		prefix := name + "="
+		if strings.HasPrefix(arg, prefix) {
+			trimmed := strings.TrimSpace(arg[len(prefix):])
+			parsed, parseErr := engineopts.ParseBool(trimmed, name)
+			if parseErr != nil {
+				return false, true, false
+			}
+			return parsed, true, true
+		}
+		return false, false, true
+	}
+	var finalInclude *bool
+	lastIdx := -1
+	setFinalInclude := func(idx int, include bool) {
+		if idx > lastIdx {
+			v := include
+			finalInclude = &v
+			lastIdx = idx
+		}
+	}
+	for idx, arg := range normalized {
+		if val, matched, ok := parseBoolFlag(arg, "--include-strings"); matched {
+			if ok {
+				setFinalInclude(idx, val)
+			}
+			continue
+		}
+		if val, matched, ok := parseBoolFlag(arg, "--comments-only"); matched {
+			if ok {
+				setFinalInclude(idx, !val)
+			}
+			continue
+		}
+		if val, matched, ok := parseBoolFlag(arg, "--no-strings"); matched {
+			if ok {
+				setFinalInclude(idx, !val)
+			}
+			continue
+		}
+	}
+
 	if parseErr := fs.Parse(normalized); parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			cfg.showHelp = true
@@ -305,6 +362,30 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	fs.Visit(func(f *flag.Flag) {
 		flagWasSet[f.Name] = true
 	})
+
+	includeStringsChanged := false
+	if finalInclude != nil {
+		*includeStrings = *finalInclude
+		includeStringsChanged = true
+	} else {
+		includeStringsChanged = flagWasSet["include-strings"]
+		if flagWasSet["comments-only"] {
+			if *commentsOnly {
+				*includeStrings = false
+			} else if !includeStringsChanged {
+				*includeStrings = true
+			}
+			includeStringsChanged = true
+		}
+		if flagWasSet["no-strings"] {
+			if *noStrings {
+				*includeStrings = false
+			} else if !includeStringsChanged {
+				*includeStrings = true
+			}
+			includeStringsChanged = true
+		}
+	}
 
 	if *full {
 		if !*withComment {
@@ -356,6 +437,10 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		v := *mode
 		flagEngine.Mode = &v
 	}
+	if flagWasSet["detect"] {
+		v := *detect
+		flagEngine.Detect = &v
+	}
 	if flagWasSet["author"] {
 		v := *author
 		flagEngine.Author = &v
@@ -371,6 +456,14 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	if pathRegex.WasSet() {
 		vals := pathRegex.Slice()
 		flagEngine.PathRegex = &vals
+	}
+	if detectLangs.WasSet() {
+		vals := detectLangs.Slice()
+		flagEngine.DetectLangs = &vals
+	}
+	if tagList.WasSet() {
+		vals := tagList.Slice()
+		flagEngine.Tags = &vals
 	}
 	if flagWasSet["exclude-typical"] {
 		v := *excludeTypical
@@ -400,6 +493,14 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		v := !*noIgnoreWS
 		flagEngine.IgnoreWS = &v
 	}
+	if includeStringsChanged {
+		v := *includeStrings
+		flagEngine.IncludeStrings = &v
+	}
+	if flagWasSet["max-file-bytes"] {
+		v := *maxFileBytes
+		flagEngine.MaxFileBytes = &v
+	}
 	if flagWasSet["jobs"] {
 		v := *jobs
 		flagEngine.Jobs = &v
@@ -415,6 +516,10 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	if flagWasSet["color"] {
 		v := *colorMode
 		flagEngine.Color = &v
+	}
+	if flagWasSet["no-prefilter"] {
+		v := *noPrefilter
+		flagEngine.NoPrefilter = &v
 	}
 
 	var flagUI config.UIConfig
@@ -672,11 +777,28 @@ Search & attribution:
       --exclude LIST            Exclude pathspec/glob(s) (repeatable / CSV)
       --path-regex REGEXP       Post-filter file paths by Go regexp (OR across entries)
       --exclude-typical         Apply typical excludes: vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*
+      --detect {auto|parse|regex}
+                               Detection engine (default: auto)
+      --detect-langs LIST       Limit parser-based detection to languages (repeatable / CSV)
+      --tags LIST               Override detection tags (repeatable / CSV)
+      --include-strings         Include string literals (default)
+      --comments-only           Scan comments only (alias of --no-strings)
+      --no-strings              Alias of --comments-only
+                               When combining --include-strings/--comments-only/--no-strings,
+                               the last flag wins.
+      --max-file-bytes N        Skip parser detection above N bytes (0 = unlimited)
+      --no-prefilter            Disable git grep prefilter prior to parsing
 
 Output:
   -o, --output {table|tsv|json}  Output format (default: table)
       --color {auto|always|never} Colorize table output (default: auto)
       --fields LIST             Columns for table/TSV (comma-separated; overrides --with-*)
+                               Available columns: type, tag, kind, lang, author, email,
+                               date, age, commit, location, text, span, comment, message,
+                               url/commit_url, pr/prs/pr_urls
+                               type reports the normalized tag (TODO/FIXME); kind reports
+                               where the match came from (comment/string/heredoc). Include
+                               comment/message explicitly when overriding defaults.
 
 Extra columns (hidden by default):
       --full                     Show both COMMENT and MESSAGE columns
@@ -776,11 +898,28 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --exclude LIST            除外する pathspec/glob（繰り返し/カンマ区切り）
       --path-regex REGEXP       ファイルパスを Go の正規表現で後段フィルタ（OR 条件）
       --exclude-typical         典型的な除外セットを適用（vendor/**, node_modules/**, dist/**, build/**, target/**, *.min.*）
+      --detect {auto|parse|regex}
+                                検出エンジン（既定: auto）
+      --detect-langs LIST       構文解析対象の言語を限定（繰り返し/カンマ区切り）
+      --tags LIST               検出タグを上書き（繰り返し/カンマ区切り）
+      --include-strings         文字列リテラルも対象（既定で有効）
+      --comments-only           コメントのみを対象（--no-strings の別名）
+      --no-strings              --comments-only の別名
+                               これらを併用した場合は最後に指定したフラグが優先されます。
+      --max-file-bytes N        N バイト超のファイルは構文解析をスキップ（0=無制限）
+      --no-prefilter            git grep による事前フィルタを無効化
 
 出力:
   -o, --output {table|tsv|json}  出力形式（既定: table）
       --color {auto|always|never} 表形式に色付け（既定: auto）
       --fields LIST             table/TSV の列を指定（カンマ区切り。--with-* より優先）
+                               指定可能な列: type, tag, kind, lang, author, email, date,
+                               age, commit, location, text, span, comment, message,
+                               url/commit_url, pr/prs/pr_urls
+                               type は正規化タグ（TODO/FIXME など）、kind は検出元
+                               （comment/string/heredoc 等）を表します。既定列を
+                               上書きする場合は comment や message も明示的に
+                               含めてください。
 
 追加カラム（既定は非表示）:
       --full                     COMMENT と MESSAGE を両方表示

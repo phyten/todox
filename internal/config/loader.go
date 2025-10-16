@@ -17,6 +17,8 @@ import (
 var engineKeyMap = map[string]string{
 	"type":             "type",
 	"mode":             "mode",
+	"detect":           "detect",
+	"detect_mode":      "detect",
 	"author":           "author",
 	"path":             "path",
 	"paths":            "path",
@@ -24,17 +26,26 @@ var engineKeyMap = map[string]string{
 	"excludes":         "exclude",
 	"path_regex":       "path_regex",
 	"path_regexes":     "path_regex",
+	"detect_langs":     "detect_langs",
+	"detect_languages": "detect_langs",
+	"tags":             "tags",
 	"exclude_typical":  "exclude_typical",
 	"with_comment":     "with_comment",
 	"with_message":     "with_message",
+	"include_strings":  "include_strings",
+	"no_strings":       "no_strings",
+	"comments_only":    "comments_only",
 	"truncate":         "truncate",
 	"truncate_comment": "truncate_comment",
 	"truncate_message": "truncate_message",
 	"ignore_ws":        "ignore_ws",
+	"max_file_bytes":   "max_file_bytes",
+	"max_bytes":        "max_file_bytes",
 	"jobs":             "jobs",
 	"repo":             "repo",
 	"output":           "output",
 	"color":            "color",
+	"no_prefilter":     "no_prefilter",
 }
 
 var uiKeyMap = map[string]string{
@@ -60,19 +71,19 @@ func Load(path string) (Config, error) {
 	}
 	ext := strings.ToLower(filepath.Ext(path))
 	var raw map[string]any
-       switch ext {
-       case ".yaml", ".yml":
-               if decodeErr := yaml.Unmarshal(data, &raw); decodeErr != nil {
-                       return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
-               }
-       case ".toml":
-               if decodeErr := toml.Unmarshal(data, &raw); decodeErr != nil {
-                       return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
-               }
-       case ".json":
-               if decodeErr := json.Unmarshal(data, &raw); decodeErr != nil {
-                       return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
-               }
+	switch ext {
+	case ".yaml", ".yml":
+		if decodeErr := yaml.Unmarshal(data, &raw); decodeErr != nil {
+			return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
+		}
+	case ".toml":
+		if decodeErr := toml.Unmarshal(data, &raw); decodeErr != nil {
+			return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
+		}
+	case ".json":
+		if decodeErr := json.Unmarshal(data, &raw); decodeErr != nil {
+			return cfg, fmt.Errorf("parse %s: %w", path, decodeErr)
+		}
 	default:
 		return cfg, fmt.Errorf("unsupported config extension: %s", ext)
 	}
@@ -149,8 +160,35 @@ func fillSection(dst, src map[string]any, allowed map[string]string, section str
 }
 
 func assignEngine(section map[string]any, dst *EngineConfig) error {
+	if raw, ok := section["include_strings"]; ok {
+		b, err := expectBool(raw, "include_strings")
+		if err != nil {
+			return err
+		}
+		val := b
+		dst.IncludeStrings = &val
+	}
+	if raw, ok := section["comments_only"]; ok {
+		b, err := expectBool(raw, "comments_only")
+		if err != nil {
+			return err
+		}
+		val := b
+		dst.CommentsOnly = &val
+	}
+	if raw, ok := section["no_strings"]; ok {
+		b, err := expectBool(raw, "no_strings")
+		if err != nil {
+			return err
+		}
+		flipped := !b
+		dst.IncludeStrings = &flipped
+	}
+
 	for key, value := range section {
 		switch key {
+		case "include_strings", "comments_only", "no_strings":
+			continue
 		case "type":
 			str, err := expectString(value, key)
 			if err != nil {
@@ -163,6 +201,12 @@ func assignEngine(section map[string]any, dst *EngineConfig) error {
 				return err
 			}
 			dst.Mode = &str
+		case "detect":
+			str, err := expectString(value, key)
+			if err != nil {
+				return err
+			}
+			dst.Detect = &str
 		case "author":
 			str, err := expectString(value, key)
 			if err != nil {
@@ -187,6 +231,18 @@ func assignEngine(section map[string]any, dst *EngineConfig) error {
 				return err
 			}
 			dst.PathRegex = &list
+		case "detect_langs":
+			list, err := expectStringList(value, key)
+			if err != nil {
+				return err
+			}
+			dst.DetectLangs = &list
+		case "tags":
+			list, err := expectStringList(value, key)
+			if err != nil {
+				return err
+			}
+			dst.Tags = &list
 		case "exclude_typical":
 			b, err := expectBool(value, key)
 			if err != nil {
@@ -229,6 +285,12 @@ func assignEngine(section map[string]any, dst *EngineConfig) error {
 				return err
 			}
 			dst.IgnoreWS = &b
+		case "max_file_bytes":
+			n, err := expectInt(value, key)
+			if err != nil {
+				return err
+			}
+			dst.MaxFileBytes = &n
 		case "jobs":
 			n, err := expectInt(value, key)
 			if err != nil {
@@ -255,6 +317,12 @@ func assignEngine(section map[string]any, dst *EngineConfig) error {
 			}
 			trimmed := strings.TrimSpace(str)
 			dst.Color = &trimmed
+		case "no_prefilter":
+			b, err := expectBool(value, key)
+			if err != nil {
+				return err
+			}
+			dst.NoPrefilter = &b
 		default:
 			return fmt.Errorf("unknown key: %s", key)
 		}

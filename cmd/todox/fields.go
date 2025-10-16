@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/phyten/todox/internal/engine"
+	"github.com/phyten/todox/internal/model"
 )
 
 type Field struct {
@@ -37,16 +38,21 @@ type fieldMeta struct {
 
 var fieldRegistry = map[string]fieldMeta{
 	"type":       {header: "TYPE"},
+	"lang":       {header: "LANG"},
+	"kind":       {header: "KIND"},
+	"tag":        {header: "TAG"},
 	"author":     {header: "AUTHOR"},
 	"email":      {header: "EMAIL"},
 	"date":       {header: "DATE"},
 	"age":        {header: "AGE", isAge: true},
 	"commit":     {header: "COMMIT"},
 	"location":   {header: "LOCATION"},
+	"text":       {header: "TEXT"},
+	"span":       {header: "SPAN"},
 	"comment":    {header: "COMMENT", isComment: true},
 	"message":    {header: "MESSAGE", isMessage: true},
 	"url":        {header: "URL", isURL: true},
-	"commit_url": {header: "URL", isURL: true},
+	"commit_url": {header: "COMMIT_URL", isURL: true},
 	"pr":         {header: "PR", isPR: true},
 	"prs":        {header: "PRS", isPR: true},
 	"pr_urls":    {header: "PR_URLS", isPR: true},
@@ -130,6 +136,12 @@ func formatFieldValue(it engine.Item, key string) string {
 	switch key {
 	case "type":
 		return it.Kind
+	case "lang":
+		return it.Lang
+	case "kind":
+		return it.MatchKind
+	case "tag":
+		return it.Tag
 	case "author":
 		return it.Author
 	case "email":
@@ -142,6 +154,10 @@ func formatFieldValue(it engine.Item, key string) string {
 		return short(it.Commit)
 	case "location":
 		return fmt.Sprintf("%s:%d", it.File, it.Line)
+	case "text":
+		return it.Text
+	case "span":
+		return formatSpan(it.Span)
 	case "comment":
 		return it.Comment
 	case "message":
@@ -198,4 +214,23 @@ func formatPRURLs(prs []engine.PullRequestRef) string {
 		parts = append(parts, pr.URL)
 	}
 	return strings.Join(parts, "; ")
+}
+
+func formatSpan(span model.Span) string {
+	if span.StartLine <= 0 {
+		return ""
+	}
+	startCol := span.StartCol
+	if startCol <= 0 {
+		startCol = 1
+	}
+	endLine := span.EndLine
+	if endLine <= 0 {
+		endLine = span.StartLine
+	}
+	endCol := span.EndCol
+	if endCol <= 0 {
+		endCol = startCol
+	}
+	return fmt.Sprintf("%d:%d-%d:%d", span.StartLine, startCol, endLine, endCol)
 }

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phyten/todox/internal/model"
 )
 
 func TestBlameSHAコマンド引数(t *testing.T) {
@@ -118,13 +120,17 @@ func TestKindOf判定パターン(t *testing.T) {
 		"FIXME のみを含む":          "FIXME",
 		"両方 TODO と FIXME を含む":  "TODO|FIXME",
 		"どちらも含まない":             "UNKNOWN",
-		"小文字todoは対象外 FIXMEは検出": "FIXME",
+		"小文字todoは対象外 FIXMEは検出": "TODO|FIXME",
 		"TODO と FIXME が同じ行にある": "TODO|FIXME",
 	}
 	for input, want := range cases {
-		if got := kindOf(input); got != want {
+		if got := kindOf(input, nil); got != want {
 			t.Fatalf("kindOf(%q) の結果が想定外です: got=%q want=%q", input, got, want)
 		}
+	}
+
+	if got := kindOf("NOTE を含む", []string{"NOTE"}); got != "NOTE" {
+		t.Fatalf("カスタムタグ NOTE を検出できません: got=%q", got)
 	}
 }
 
@@ -142,15 +148,20 @@ func TestExtractCommentタイプごとに抽出(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := extractComment(text, tc.typ); got != tc.want {
+			if got := extractComment(text, tc.typ, nil); got != tc.want {
 				t.Fatalf("extractComment(%q, %q) = %q, want %q", text, tc.typ, got, tc.want)
 			}
 		})
 	}
 
 	const none = "コメント対象なし"
-	if got := extractComment(none, "todo"); got != none {
+	if got := extractComment(none, "todo", nil); got != none {
 		t.Fatalf("TODOが存在しない場合は元の文字列を返すべきです: got=%q want=%q", got, none)
+	}
+
+	custom := "prefix NOTE keep"
+	if got := extractComment(custom, "both", []string{"NOTE"}); got != "NOTE keep" {
+		t.Fatalf("カスタムタグ NOTE の抽出が期待と異なります: got=%q", got)
 	}
 }
 
@@ -159,9 +170,9 @@ func TestTruncateDisplayWidth多バイト文字と省略記号(t *testing.T) {
 	if got := truncateDisplayWidth(input, 0); got != input {
 		t.Fatalf("0指定の場合は元の文字列を返すべきです: got=%q want=%q", got, input)
 	}
-	if got := truncateDisplayWidth(input, 3); got != "あ…" {
-		t.Fatalf("多バイト文字の切り詰めが期待と異なります: got=%q want=%q", got, "あい…")
-	}
+    if got := truncateDisplayWidth(input, 3); got != "あ…" {
+        t.Fatalf("多バイト文字の切り詰めが期待と異なります: got=%q want=%q", got, "あ…")
+    }
 	if got := truncateDisplayWidth("abc", 1); got != "…" {
 		t.Fatalf("1文字指定時は省略記号のみの想定です: got=%q", got)
 	}
@@ -201,6 +212,31 @@ func TestAgeDays計算(t *testing.T) {
 	}
 }
 
+func TestNormalizeSpan補正(t *testing.T) {
+	span := normalizeSpan(model.Span{})
+	if span.StartLine != 1 || span.EndLine != 1 {
+		t.Fatalf("StartLine/EndLine が補正されていません: %+v", span)
+	}
+	if span.StartCol != 1 || span.EndCol != 1 {
+		t.Fatalf("列番号が補正されていません: %+v", span)
+	}
+	if span.ByteStart != 0 || span.ByteEnd != 0 {
+		t.Fatalf("バイトオフセットが補正されていません: %+v", span)
+	}
+
+	input := model.Span{StartLine: 3, StartCol: 5, EndLine: 4, EndCol: 2, ByteStart: 10, ByteEnd: 8}
+	normalized := normalizeSpan(input)
+	if normalized.StartLine != 3 || normalized.EndLine != 4 {
+		t.Fatalf("行番号が書き換わるべきではありません: %+v", normalized)
+	}
+	if normalized.EndCol != 5 {
+		t.Fatalf("EndCol は StartCol 以上に丸める: got=%d want=%d", normalized.EndCol, 5)
+	}
+	if normalized.ByteEnd != normalized.ByteStart {
+		t.Fatalf("ByteEnd は ByteStart 以上であるべきです: %+v", normalized)
+	}
+}
+
 func TestNewItemErrorメッセージ整形(t *testing.T) {
 	err := errors.New("  failure happened  ")
 	item := newItemError("file.go", 10, "stage", err)
@@ -232,7 +268,7 @@ func TestGitGrepHandlesLongLines(t *testing.T) {
 	runGit(t, repoDir, "add", "long.go")
 	runGit(t, repoDir, "commit", "-m", "add long line")
 
-	matches, err := gitGrep(repoDir, "TODO", nil, nil, false)
+	matches, err := gitGrepMatches(repoDir, "TODO", nil, nil, false)
 	if err != nil {
 		t.Fatalf("gitGrep returned error: %v", err)
 	}

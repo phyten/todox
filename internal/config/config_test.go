@@ -9,8 +9,6 @@ import (
 
 func strPtr(s string) *string { return &s }
 
-func boolPtr(b bool) *bool { return &b }
-
 func intPtr(n int) *int { return &n }
 
 func stringsPtr(values ...string) *[]string {
@@ -19,16 +17,19 @@ func stringsPtr(values ...string) *[]string {
 }
 
 func TestMergeEnginePrecedence(t *testing.T) {
-	base := EngineSettings{Type: "both", IgnoreWS: true, Jobs: 2, Paths: []string{"base"}}
+	base := EngineSettings{Type: "both", Detect: "auto", IgnoreWS: true, Jobs: 2, Paths: []string{"base"}, IncludeStrings: true}
 
-	fileCfg := EngineConfig{Type: strPtr("todo"), IgnoreWS: boolPtr(false), Paths: stringsPtr("file")}
-	envCfg := EngineConfig{Type: strPtr("fixme"), Paths: stringsPtr("env")}
-	flagCfg := EngineConfig{Type: strPtr("both"), Paths: stringsPtr("flag"), Jobs: intPtr(8)}
+	fileCfg := EngineConfig{Type: strPtr("todo"), Detect: strPtr("parse"), IgnoreWS: boolPtr(false), Paths: stringsPtr("file")}
+	envCfg := EngineConfig{Type: strPtr("fixme"), Paths: stringsPtr("env"), CommentsOnly: boolPtr(true)}
+	flagCfg := EngineConfig{Type: strPtr("both"), Paths: stringsPtr("flag"), Jobs: intPtr(8), IncludeStrings: boolPtr(true), Detect: strPtr("regex")}
 
 	merged := MergeEngine(base, fileCfg, envCfg, flagCfg)
 
 	if merged.Type != "both" {
 		t.Fatalf("expected Type both, got %q", merged.Type)
+	}
+	if merged.Detect != "regex" {
+		t.Fatalf("expected Detect regex, got %q", merged.Detect)
 	}
 	if !reflect.DeepEqual(merged.Paths, []string{"flag"}) {
 		t.Fatalf("unexpected paths: %v", merged.Paths)
@@ -38,6 +39,9 @@ func TestMergeEnginePrecedence(t *testing.T) {
 	}
 	if merged.Jobs != 8 {
 		t.Fatalf("expected Jobs 8, got %d", merged.Jobs)
+	}
+	if !merged.IncludeStrings {
+		t.Fatal("expected IncludeStrings true after flag override")
 	}
 }
 
@@ -66,6 +70,7 @@ func TestMergeUIPrecedence(t *testing.T) {
 func TestFromEnv(t *testing.T) {
 	env := map[string]string{
 		"TODOX_TYPE":             "todo",
+		"TODOX_DETECT":           "regex",
 		"TODOX_AUTHOR":           "Alice",
 		"TODOX_WITH_COMMENT":     "1",
 		"TODOX_WITH_MESSAGE":     "true",
@@ -73,10 +78,16 @@ func TestFromEnv(t *testing.T) {
 		"TODOX_PATH_REGEX":       ".*\\.go$",
 		"TODOX_EXCLUDE":          "vendor,dist",
 		"TODOX_EXCLUDE_TYPICAL":  "yes",
+		"TODOX_DETECT_LANGS":     "go,py",
+		"TODOX_TAGS":             "TODO,FIXME",
+		"TODOX_INCLUDE_STRINGS":  "1",
+		"TODOX_NO_STRINGS":       "true",
+		"TODOX_COMMENTS_ONLY":    "1",
 		"TODOX_TRUNCATE":         "5000",
 		"TODOX_TRUNCATE_COMMENT": "80",
 		"TODOX_TRUNCATE_MESSAGE": "72",
 		"TODOX_IGNORE_WS":        "0",
+		"TODOX_MAX_FILE_BYTES":   "8192",
 		"TODOX_JOBS":             "128",
 		"TODOX_PR_STATE":         "open",
 		"TODOX_PR_LIMIT":         "4",
@@ -85,6 +96,7 @@ func TestFromEnv(t *testing.T) {
 		"TODOX_WITH_PR_LINKS":    "yes",
 		"TODOX_FIELDS":           "type,author",
 		"TODOX_SORT":             "-age",
+		"TODOX_NO_PREFILTER":     "1",
 	}
 	cfg, err := FromEnv(func(key string) string { return env[key] })
 	if err != nil {
@@ -96,11 +108,17 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Engine.Author == nil || *cfg.Engine.Author != "Alice" {
 		t.Fatalf("expected Author Alice, got %+v", cfg.Engine.Author)
 	}
+	if cfg.Engine.Detect == nil || *cfg.Engine.Detect != "regex" {
+		t.Fatalf("expected Detect regex, got %+v", cfg.Engine.Detect)
+	}
 	if cfg.Engine.WithComment == nil || !*cfg.Engine.WithComment {
 		t.Fatal("expected WithComment true")
 	}
 	if cfg.Engine.WithMessage == nil || !*cfg.Engine.WithMessage {
 		t.Fatal("expected WithMessage true")
+	}
+	if cfg.Engine.IncludeStrings == nil || *cfg.Engine.IncludeStrings {
+		t.Fatal("expected IncludeStrings false")
 	}
 	if cfg.Engine.Paths == nil || !reflect.DeepEqual(*cfg.Engine.Paths, []string{"src", "cmd"}) {
 		t.Fatalf("unexpected paths: %v", cfg.Engine.Paths)
@@ -110,6 +128,12 @@ func TestFromEnv(t *testing.T) {
 	}
 	if cfg.Engine.Excludes == nil || !reflect.DeepEqual(*cfg.Engine.Excludes, []string{"vendor", "dist"}) {
 		t.Fatalf("unexpected excludes: %v", cfg.Engine.Excludes)
+	}
+	if cfg.Engine.DetectLangs == nil || !reflect.DeepEqual(*cfg.Engine.DetectLangs, []string{"go", "py"}) {
+		t.Fatalf("unexpected detect_langs: %v", cfg.Engine.DetectLangs)
+	}
+	if cfg.Engine.Tags == nil || !reflect.DeepEqual(*cfg.Engine.Tags, []string{"TODO", "FIXME"}) {
+		t.Fatalf("unexpected tags: %v", cfg.Engine.Tags)
 	}
 	if cfg.Engine.ExcludeTypical == nil || !*cfg.Engine.ExcludeTypical {
 		t.Fatal("expected ExcludeTypical true")
@@ -126,8 +150,14 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Engine.IgnoreWS == nil || *cfg.Engine.IgnoreWS {
 		t.Fatal("expected IgnoreWS false")
 	}
+	if cfg.Engine.MaxFileBytes == nil || *cfg.Engine.MaxFileBytes != 8192 {
+		t.Fatalf("unexpected max_file_bytes: %+v", cfg.Engine.MaxFileBytes)
+	}
 	if cfg.Engine.Jobs == nil || *cfg.Engine.Jobs != 128 {
 		t.Fatalf("expected Jobs 128, got %+v", cfg.Engine.Jobs)
+	}
+	if cfg.Engine.NoPrefilter == nil || !*cfg.Engine.NoPrefilter {
+		t.Fatal("expected NoPrefilter true")
 	}
 	if cfg.UI.PRState == nil || *cfg.UI.PRState != "open" {
 		t.Fatalf("expected PRState open, got %+v", cfg.UI.PRState)
@@ -152,12 +182,25 @@ func TestFromEnv(t *testing.T) {
 	}
 }
 
+func TestAssignEngineNoStrings(t *testing.T) {
+	section := map[string]any{
+		"no_strings": true,
+	}
+	var cfg EngineConfig
+	if err := assignEngine(section, &cfg); err != nil {
+		t.Fatalf("assignEngine returned error: %v", err)
+	}
+	if cfg.IncludeStrings == nil || *cfg.IncludeStrings {
+		t.Fatal("expected IncludeStrings to be false when no_strings is true")
+	}
+}
+
 func TestLoadConfigFormats(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string]string{
-		".yaml": "type: fixme\npath:\n  - src\nwith_comment: true\nui:\n  pr_state: merged\n  with_age: true\n",
-		".toml": "type = \"todo\"\npath = [\"cmd\"]\nwith_message = true\n[ui]\npr_limit = 6\nwith_pr_links = true\n",
-		".json": "{\n  \"engine\": {\"type\": \"todo\", \"exclude\": [\"vendor\"]},\n  \"pr_prefer\": \"closed\"\n}\n",
+		".yaml": "type: fixme\ndetect: parse\npath:\n  - src\nwith_comment: true\ninclude_strings: false\nmax_file_bytes: 2048\nno_prefilter: true\ntags:\n  - FIXME\nui:\n  pr_state: merged\n  with_age: true\n",
+		".toml": "type = \"todo\"\ndetect = \"regex\"\ndetect_langs = [\"go\"]\npath = [\"cmd\"]\nwith_message = true\n[ui]\npr_limit = 6\nwith_pr_links = true\n",
+		".json": "{\n  \"engine\": {\"type\": \"todo\", \"exclude\": [\"vendor\"], \"tags\": [\"TODO\", \"FIXME\"]},\n  \"pr_prefer\": \"closed\"\n}\n",
 	}
 
 	for ext, content := range cases {
@@ -178,8 +221,20 @@ func TestLoadConfigFormats(t *testing.T) {
 				if *cfg.Engine.Type != "fixme" {
 					t.Fatalf("yaml type mismatch: %q", *cfg.Engine.Type)
 				}
+				if cfg.Engine.Detect == nil || *cfg.Engine.Detect != "parse" {
+					t.Fatalf("yaml detect mismatch: %q", ptrString(cfg.Engine.Detect))
+				}
 				if cfg.Engine.WithComment == nil || !*cfg.Engine.WithComment {
 					t.Fatal("yaml with_comment should be true")
+				}
+				if cfg.Engine.IncludeStrings == nil || *cfg.Engine.IncludeStrings {
+					t.Fatal("yaml include_strings should be false")
+				}
+				if cfg.Engine.MaxFileBytes == nil || *cfg.Engine.MaxFileBytes != 2048 {
+					t.Fatalf("yaml max_file_bytes mismatch: %d", ptrInt(cfg.Engine.MaxFileBytes))
+				}
+				if cfg.Engine.NoPrefilter == nil || !*cfg.Engine.NoPrefilter {
+					t.Fatal("yaml no_prefilter should be true")
 				}
 				if cfg.UI.PRState == nil || *cfg.UI.PRState != "merged" {
 					t.Fatalf("yaml pr_state mismatch: %q", ptrString(cfg.UI.PRState))
@@ -191,6 +246,12 @@ func TestLoadConfigFormats(t *testing.T) {
 				if cfg.Engine.WithMessage == nil || !*cfg.Engine.WithMessage {
 					t.Fatal("toml with_message should be true")
 				}
+				if cfg.Engine.Detect == nil || *cfg.Engine.Detect != "regex" {
+					t.Fatalf("toml detect mismatch: %q", ptrString(cfg.Engine.Detect))
+				}
+				if cfg.Engine.DetectLangs == nil || !reflect.DeepEqual(*cfg.Engine.DetectLangs, []string{"go"}) {
+					t.Fatalf("toml detect_langs mismatch: %v", cfg.Engine.DetectLangs)
+				}
 				if cfg.UI.PRLimit == nil || *cfg.UI.PRLimit != 6 {
 					t.Fatalf("toml pr_limit mismatch: %d", ptrInt(cfg.UI.PRLimit))
 				}
@@ -200,6 +261,9 @@ func TestLoadConfigFormats(t *testing.T) {
 			case ".json":
 				if cfg.Engine.Excludes == nil || !reflect.DeepEqual(*cfg.Engine.Excludes, []string{"vendor"}) {
 					t.Fatalf("json exclude mismatch: %v", cfg.Engine.Excludes)
+				}
+				if cfg.Engine.Tags == nil || !reflect.DeepEqual(*cfg.Engine.Tags, []string{"TODO", "FIXME"}) {
+					t.Fatalf("json tags mismatch: %v", cfg.Engine.Tags)
 				}
 				if cfg.UI.PRPrefer == nil || *cfg.UI.PRPrefer != "closed" {
 					t.Fatalf("json pr_prefer mismatch: %q", ptrString(cfg.UI.PRPrefer))
@@ -222,13 +286,13 @@ func TestLoadUnknownKey(t *testing.T) {
 
 func TestFindOrder(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "repo")
-       if mkErr := os.MkdirAll(filepath.Join(repoRoot, "sub", "dir"), 0o755); mkErr != nil {
-               t.Fatalf("mkdir: %v", mkErr)
-       }
-       repoConfig := filepath.Join(repoRoot, ".todox.yaml")
-       if writeErr := os.WriteFile(repoConfig, []byte("type: todo\n"), 0o644); writeErr != nil {
-               t.Fatalf("write repo config: %v", writeErr)
-       }
+	if mkErr := os.MkdirAll(filepath.Join(repoRoot, "sub", "dir"), 0o755); mkErr != nil {
+		t.Fatalf("mkdir: %v", mkErr)
+	}
+	repoConfig := filepath.Join(repoRoot, ".todox.yaml")
+	if writeErr := os.WriteFile(repoConfig, []byte("type: todo\n"), 0o644); writeErr != nil {
+		t.Fatalf("write repo config: %v", writeErr)
+	}
 	path, where, err := Find(filepath.Join(repoRoot, "sub", "dir"), "", "", "")
 	if err != nil {
 		t.Fatalf("Find failed: %v", err)
@@ -239,9 +303,9 @@ func TestFindOrder(t *testing.T) {
 
 	explicitDir := t.TempDir()
 	explicit := filepath.Join(explicitDir, "custom.toml")
-       if writeErr := os.WriteFile(explicit, []byte("type='fixme'\n"), 0o644); writeErr != nil {
-               t.Fatalf("write explicit: %v", writeErr)
-       }
+	if writeErr := os.WriteFile(explicit, []byte("type='fixme'\n"), 0o644); writeErr != nil {
+		t.Fatalf("write explicit: %v", writeErr)
+	}
 	path, where, err = Find(repoRoot, explicit, "", "")
 	if err != nil {
 		t.Fatalf("Find explicit failed: %v", err)
@@ -251,13 +315,13 @@ func TestFindOrder(t *testing.T) {
 	}
 
 	xdgHome := t.TempDir()
-       if mkErr := os.MkdirAll(filepath.Join(xdgHome, "todox"), 0o755); mkErr != nil {
-               t.Fatalf("mkdir xdg: %v", mkErr)
-       }
-       xdgPath := filepath.Join(xdgHome, "todox", "config.json")
-       if writeErr := os.WriteFile(xdgPath, []byte("{}"), 0o644); writeErr != nil {
-               t.Fatalf("write xdg: %v", writeErr)
-       }
+	if mkErr := os.MkdirAll(filepath.Join(xdgHome, "todox"), 0o755); mkErr != nil {
+		t.Fatalf("mkdir xdg: %v", mkErr)
+	}
+	xdgPath := filepath.Join(xdgHome, "todox", "config.json")
+	if writeErr := os.WriteFile(xdgPath, []byte("{}"), 0o644); writeErr != nil {
+		t.Fatalf("write xdg: %v", writeErr)
+	}
 	path, where, err = Find(t.TempDir(), "", xdgHome, "")
 	if err != nil {
 		t.Fatalf("Find xdg failed: %v", err)
@@ -268,9 +332,9 @@ func TestFindOrder(t *testing.T) {
 
 	homeDir := t.TempDir()
 	homePath := filepath.Join(homeDir, ".todox.toml")
-       if writeErr := os.WriteFile(homePath, []byte("type='both'\n"), 0o644); writeErr != nil {
-               t.Fatalf("write home: %v", writeErr)
-       }
+	if writeErr := os.WriteFile(homePath, []byte("type='both'\n"), 0o644); writeErr != nil {
+		t.Fatalf("write home: %v", writeErr)
+	}
 	path, where, err = Find(t.TempDir(), "", "", homeDir)
 	if err != nil {
 		t.Fatalf("Find home failed: %v", err)

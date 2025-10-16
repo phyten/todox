@@ -2,11 +2,17 @@ package config
 
 import "strings"
 
+func boolPtr(v bool) *bool {
+	b := v
+	return &b
+}
+
 func MergeEngine(base EngineSettings, layers ...EngineConfig) EngineSettings {
 	out := base
 	for _, layer := range layers {
 		out.Type = ResolveString(out.Type, layer.Type)
 		out.Mode = ResolveString(out.Mode, layer.Mode)
+		out.Detect = ResolveString(out.Detect, layer.Detect)
 		out.Author = ResolveString(out.Author, layer.Author)
 		out.Paths = ResolveStrings(out.Paths, layer.Paths)
 		out.Excludes = ResolveStrings(out.Excludes, layer.Excludes)
@@ -14,6 +20,12 @@ func MergeEngine(base EngineSettings, layers ...EngineConfig) EngineSettings {
 		out.ExcludeTypical = ResolveBool(out.ExcludeTypical, layer.ExcludeTypical)
 		out.WithComment = ResolveBool(out.WithComment, layer.WithComment)
 		out.WithMessage = ResolveBool(out.WithMessage, layer.WithMessage)
+		out.IncludeStrings = ResolveBool(out.IncludeStrings, layer.IncludeStrings)
+		if layer.CommentsOnly != nil {
+			out.IncludeStrings = ResolveBool(out.IncludeStrings, boolPtr(!*layer.CommentsOnly))
+		}
+		out.DetectLangs = ResolveStrings(out.DetectLangs, layer.DetectLangs)
+		out.Tags = ResolveStrings(out.Tags, layer.Tags)
 		out.TruncAll = ResolveInt(out.TruncAll, layer.TruncAll)
 		out.TruncComment = ResolveInt(out.TruncComment, layer.TruncComment)
 		out.TruncMessage = ResolveInt(out.TruncMessage, layer.TruncMessage)
@@ -22,6 +34,8 @@ func MergeEngine(base EngineSettings, layers ...EngineConfig) EngineSettings {
 		out.Repo = ResolveAndTrim(out.Repo, layer.Repo)
 		out.Output = ResolveAndTrim(out.Output, layer.Output)
 		out.Color = ResolveAndTrim(out.Color, layer.Color)
+		out.MaxFileBytes = ResolveInt(out.MaxFileBytes, layer.MaxFileBytes)
+		out.NoPrefilter = ResolveBool(out.NoPrefilter, layer.NoPrefilter)
 	}
 	if strings.TrimSpace(out.Output) == "" {
 		out.Output = "table"

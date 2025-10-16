@@ -4,23 +4,29 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/phyten/todox/internal/model"
 	"github.com/phyten/todox/internal/progress"
 )
 
 // Item は 1 件の TODO/FIXME を表す
 type Item struct {
-	Kind    string           `json:"kind"` // TODO | FIXME | TODO|FIXME
-	Author  string           `json:"author"`
-	Email   string           `json:"email"`
-	Date    string           `json:"date"`     // author date (iso-strict-local)
-	AgeDays int              `json:"age_days"` // author date からの経過日数
-	Commit  string           `json:"commit"`   // full SHA
-	File    string           `json:"file"`
-	Line    int              `json:"line"`
-	Comment string           `json:"comment,omitempty"` // TODO/FIXME からの行
-	Message string           `json:"message,omitempty"` // commit subject (1行目)
-	URL     string           `json:"url,omitempty"`     // コミット行への恒久リンク
-	PRs     []PullRequestRef `json:"prs,omitempty"`
+	Kind      string           `json:"kind"`
+	Tag       string           `json:"tag,omitempty"`
+	Lang      string           `json:"lang,omitempty"`
+	MatchKind string           `json:"match_kind,omitempty"`
+	Text      string           `json:"text,omitempty"`
+	Span      model.Span       `json:"span"`
+	Author    string           `json:"author"`
+	Email     string           `json:"email"`
+	Date      string           `json:"date"`
+	AgeDays   int              `json:"age_days"`
+	Commit    string           `json:"commit"`
+	File      string           `json:"file"`
+	Line      int              `json:"line"`
+	Comment   string           `json:"comment,omitempty"`
+	Message   string           `json:"message,omitempty"`
+	URL       string           `json:"url,omitempty"`
+	PRs       []PullRequestRef `json:"prs,omitempty"`
 }
 
 // PullRequestRef はコミットに紐づく PR の参照情報を表す
@@ -44,9 +50,12 @@ type ItemError struct {
 type Options struct {
 	Type              string // todo|fixme|both
 	Mode              string // last|first
+	DetectMode        string
 	AuthorRegex       string
 	WithComment       bool
 	WithMessage       bool
+	IncludeStrings    bool
+	Tags              []string
 	TruncAll          int
 	TruncComment      int
 	TruncMessage      int
@@ -55,11 +64,14 @@ type Options struct {
 	RepoDir           string
 	Progress          bool
 	Now               time.Time
+	DetectLangs       []string
 	Paths             []string
 	Excludes          []string
 	PathRegex         []string
 	PathRegexCompiled []*regexp.Regexp
+	MaxFileBytes      int
 	ExcludeTypical    bool
+	NoPrefilter       bool
 	ProgressObserver  progress.Observer `json:"-"`
 }
 
