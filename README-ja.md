@@ -7,7 +7,7 @@
 
 英語版 README は [README.md](./README.md) を参照してください。
 
-`todox` はリポジトリ内の **大文字の `TODO` / `FIXME`** を検索し、
+`todox` はリポジトリ内の **`TODO` / `FIXME`**（大文字・小文字を区別せず）を検索し、
 その行を**誰が追加・変更したのか**（最終 / 初回導入）を素早く洗い出せる CLI / Web ツールです。
 
 - `--mode last`（既定）：その行を**最後に変更**した人（`git blame`）
@@ -175,6 +175,20 @@ make build
 - `-t, --type {todo|fixme|both}` : スキャン対象（既定: both）
 - `-m, --mode {last|first}` : 作者の定義（既定: last）
 - `-a, --author REGEX` : 作者名/メールの正規表現フィルタ（拡張正規表現）
+- `--detect {auto|parse|regex}` : 検出エンジンを選択（構文解析 / 正規表現 / 自動フォールバック）
+- `--detect-langs go,js,py,...` : 構文解析対象の言語をカンマ区切り（または複数指定）で限定。`--detect=parse`
+  と併用した場合、リスト外の言語はスキップされ（正規表現フォールバックなし）、`--detect=auto` のときだけ
+  ヒューリスティック / プレーンテキスト走査にフォールバックします。`js` / `ts` / `py` / `rb` / `sh` / `ps1` /
+  `c++` など一般的な略称は自動的に正規化されます。
+- `--tags TODO,FIXME,NOTE` : 検出タグを上書き（大文字小文字は無視。カンマ区切り/繰り返し指定に対応）
+- `--include-strings` / `--comments-only` / `--no-strings` : 文字列リテラルを検査対象に含めるかを制御。
+  CLI ではこれらを複数指定した場合、**最後に指定したフラグが優先**されます。設定ファイル・環境変数では
+  `comments_only` / `no_strings` が指定されていれば `include_strings` よりも優先されます。Web API のクエリ
+  パラメータも設定ファイル・環境変数と同じ優先順位（後から与えた `comments_only` / `no_strings` が優先）
+  で評価されます。
+- `--max-file-bytes N` : N バイトを超えるファイルはヒューリスティック/プレーンテキスト走査にフォールバック（0 = 無制限）。
+  `--detect=parse` を指定している場合でも常にこのフォールバックが適用されます。
+- `--no-prefilter` : 構文解析前の `git grep` プリフィルタを無効化
 
 ### パスフィルタ
 
@@ -219,17 +233,31 @@ todox --with-age --color always | less -R
 > `--with-commit-link` を有効にすると各 item に `url`、Result に `has_url` が追加されます。`--with-pr-links` を有効にすると各 item に `prs[]`、Result に `has_prs` が追加されます（エントリは `{number,state,url,title,body}` を含みます。新フィールドは追加のみなので既存クライアントとの後方互換性は保たれます）。これらは公開 API の一部であり将来も保持されます。
 > `has_url` / `has_prs` は「データ取得済みか」の指標です（`--with-*` や `--fields` により内部取得されます）。列を非表示にしていてもメタ情報としては true になります。
 
-`--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。
+`--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。`--fields` を指定すると既定の列リストはすべて置き換わるため、`--with-comment` や `--with-message` を併用する場合でも `comment` / `message` を `--fields` に含める必要があります。
+
+例:
+
+```bash
+# --fields を指定した後でも comment 列を表示したい場合は明示的に含める
+todox --with-comment --fields type,author,comment
+```
 
 `--fields` で指定できる列（table / TSV）:
-- `type`, `author`, `email`, `date`, `age`, `commit`, `location`（`file:line`）
+- `type`, `tag`, `kind`, `lang`
+- `author`, `email`, `date`, `age`, `commit`, `location`（`file:line`）
+- `text`, `span`
 - `comment`, `message`
-- `url`（エイリアス: `commit_url`）
+- `url`（エイリアス: `commit_url`。ヘッダは重複を避けるため `COMMIT_URL` になります）
 - `pr`, `prs`, `pr_urls`
+
+`type` は正規化されたタグ（例: `TODO`, `FIXME`）、`tag` は一致したタグをそのまま示します。現状はどちらも大文字化されるため
+多くのケースで同一値になりますが、将来は `tag` に元の表記を残す拡張を想定しています。`kind` は検出元（`comment` / `string`
+ / `heredoc` など）、`lang` は構文解析に用いた言語名を示します。`span` は `開始行:開始桁-終了行:終了桁`（1 始まり）で出力され、
+桁位置は UTF-8 のバイト数をカウントします。
 
 ### 追加列（非表示が既定）
 
-- `--with-comment` : TODO/FIXME 行を表示
+- `--with-comment` : TODO/FIXME 行を最初に一致したタグ位置から表示
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
 - `--with-age` : table / TSV に AGE（日数）列を追加
@@ -306,7 +334,9 @@ CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レ
 
 - `--mode first` は `git log -L` を多用するため、大規模リポジトリでは時間がかかります（進捗/ETA 表示あり）。
 - `git` を必ずインストールしてください。コンテナ/Docker でもランタイムに `git` が必要です。
-- 検索対象は **大文字の `TODO` / `FIXME`** のみです（小文字は対象外）。
+- `TODO` / `FIXME` の検出は大文字小文字を区別しません。必要に応じて `--tags` で許可するタグ集合を絞り込んでください。
+- TSV / table では `commit_url` 列が `COMMIT_URL` ヘッダとして出力されます（以前の `URL` と重複しないようにするための変更です）。
+- `span` の桁位置は UTF-8 のバイト数を元に計算しています（将来的に表示幅ベースの列を追加する予定があります）。
 
 ---
 

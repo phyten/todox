@@ -191,6 +191,42 @@ func TestHelpOutputJapanese(t *testing.T) {
 	}
 }
 
+func TestParseScanArgsIncludeStringsLastWins(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--include-strings", "--comments-only"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if cfg.opts.IncludeStrings {
+		t.Fatalf("expected IncludeStrings=false when --comments-only is last, got true")
+	}
+
+	cfg, err = parseScanArgs([]string{"--comments-only", "--include-strings"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if !cfg.opts.IncludeStrings {
+		t.Fatalf("expected IncludeStrings=true when --include-strings is last, got false")
+	}
+}
+
+func TestParseScanArgsIncludeStringsEqualsForm(t *testing.T) {
+	cfg, err := parseScanArgs([]string{"--include-strings=false", "--comments-only=false"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if !cfg.opts.IncludeStrings {
+		t.Fatalf("expected IncludeStrings=true when --comments-only=false is last, got false")
+	}
+
+	cfg, err = parseScanArgs([]string{"--no-strings=false", "--comments-only"}, "en")
+	if err != nil {
+		t.Fatalf("parseScanArgs failed: %v", err)
+	}
+	if cfg.opts.IncludeStrings {
+		t.Fatalf("expected IncludeStrings=false when --comments-only is last, got true")
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

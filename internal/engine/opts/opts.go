@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/phyten/todox/internal/detect"
 	"github.com/phyten/todox/internal/engine"
 )
 
@@ -29,18 +30,24 @@ func Defaults(repoDir string) engine.Options {
 		jobs = maxJobs
 	}
 	return engine.Options{
-		Type:         "both",
-		Mode:         "last",
-		AuthorRegex:  "",
-		WithComment:  false,
-		WithMessage:  false,
-		TruncAll:     0,
-		TruncComment: 0,
-		TruncMessage: 0,
-		IgnoreWS:     true,
-		Jobs:         jobs,
-		RepoDir:      repoDir,
-		Progress:     false,
+		Type:           "both",
+		Mode:           "last",
+		DetectMode:     "auto",
+		AuthorRegex:    "",
+		WithComment:    false,
+		WithMessage:    false,
+		IncludeStrings: true,
+		Tags:           []string{"TODO", "FIXME"},
+		TruncAll:       0,
+		TruncComment:   0,
+		TruncMessage:   0,
+		IgnoreWS:       true,
+		Jobs:           jobs,
+		RepoDir:        repoDir,
+		Progress:       false,
+		DetectLangs:    nil,
+		MaxFileBytes:   0,
+		NoPrefilter:    false,
 	}
 }
 
@@ -54,6 +61,9 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 	}
 	if raw, ok := lastLiteralValue(q["mode"]); ok {
 		out.Mode = raw
+	}
+	if raw, ok := lastLiteralValue(q["detect"]); ok {
+		out.DetectMode = raw
 	}
 	if raw, ok := lastRawValue(q["author"]); ok {
 		out.AuthorRegex = raw
@@ -71,6 +81,35 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 			return out, err
 		}
 		out.WithMessage = v
+	}
+	if raw, ok := lastLiteralValue(q["include_strings"]); ok {
+		v, err := ParseBool(raw, "include_strings")
+		if err != nil {
+			return out, err
+		}
+		out.IncludeStrings = v
+	}
+	if raw, ok := lastLiteralValue(q["comments_only"]); ok {
+		v, err := ParseBool(raw, "comments_only")
+		if err != nil {
+			return out, err
+		}
+		if v {
+			out.IncludeStrings = false
+		} else {
+			out.IncludeStrings = true
+		}
+	}
+	if raw, ok := lastLiteralValue(q["no_strings"]); ok {
+		v, err := ParseBool(raw, "no_strings")
+		if err != nil {
+			return out, err
+		}
+		if v {
+			out.IncludeStrings = false
+		} else {
+			out.IncludeStrings = true
+		}
 	}
 	if raw, ok := lastLiteralValue(q["truncate"]); ok {
 		n, err := parseInt(raw, "truncate")
@@ -100,12 +139,26 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 		}
 		out.Jobs = n
 	}
+	if raw, ok := lastLiteralValue(q["max_file_bytes"]); ok {
+		n, err := parseInt(raw, "max_file_bytes")
+		if err != nil {
+			return out, err
+		}
+		out.MaxFileBytes = n
+	}
 	if raw, ok := lastLiteralValue(q["ignore_ws"]); ok {
 		v, err := ParseBool(raw, "ignore_ws")
 		if err != nil {
 			return out, err
 		}
 		out.IgnoreWS = v
+	}
+	if raw, ok := lastLiteralValue(q["no_prefilter"]); ok {
+		v, err := ParseBool(raw, "no_prefilter")
+		if err != nil {
+			return out, err
+		}
+		out.NoPrefilter = v
 	}
 	if raw, ok := lastLiteralValue(q["progress"]); ok {
 		v, err := ParseBool(raw, "progress")
@@ -122,6 +175,12 @@ func ApplyWebQueryToOptions(def engine.Options, q url.Values) (engine.Options, e
 	}
 	if raw := q["path_regex"]; len(raw) > 0 {
 		out.PathRegex = SplitMulti(raw)
+	}
+	if raw := q["detect_langs"]; len(raw) > 0 {
+		out.DetectLangs = SplitMulti(raw)
+	}
+	if raw := q["tags"]; len(raw) > 0 {
+		out.Tags = SplitMulti(raw)
 	}
 	if raw, ok := lastLiteralValue(q["exclude_typical"]); ok {
 		v, err := ParseBool(raw, "exclude_typical")
@@ -157,6 +216,15 @@ func NormalizeAndValidate(o *engine.Options) error {
 		return fmt.Errorf("invalid --mode: %s", o.Mode)
 	}
 
+	o.DetectMode = strings.ToLower(strings.TrimSpace(o.DetectMode))
+	switch o.DetectMode {
+	case "", "auto":
+		o.DetectMode = "auto"
+	case "parse", "regex":
+	default:
+		return fmt.Errorf("invalid --detect: %s", o.DetectMode)
+	}
+
 	if o.Jobs < 1 || o.Jobs > maxJobs {
 		return fmt.Errorf("jobs must be between 1 and %d", maxJobs)
 	}
@@ -179,9 +247,18 @@ func NormalizeAndValidate(o *engine.Options) error {
 		o.RepoDir = "."
 	}
 
+	if o.MaxFileBytes < 0 {
+		return fmt.Errorf("max_file_bytes must be >= 0")
+	}
+
 	o.Paths = trimSlice(o.Paths)
 	o.Excludes = trimSlice(o.Excludes)
 	o.PathRegex = trimSlice(o.PathRegex)
+	o.DetectLangs = trimSlice(o.DetectLangs)
+	if len(o.DetectLangs) > 0 {
+		o.DetectLangs = detect.CanonicalDetectLangs(o.DetectLangs)
+	}
+	o.Tags = trimSlice(o.Tags)
 
 	compiled, err := engine.CompilePathRegex(o.PathRegex)
 	if err != nil {

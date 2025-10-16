@@ -104,6 +104,9 @@ func TestResolveFieldsCommitURLAlias(t *testing.T) {
 	if len(sel.Fields) != 1 || sel.Fields[0].Key != "commit_url" {
 		t.Fatalf("unexpected fields for commit_url alias: %+v", sel.Fields)
 	}
+	if sel.Fields[0].Header != "COMMIT_URL" {
+		t.Fatalf("unexpected header for commit_url alias: %s", sel.Fields[0].Header)
+	}
 	if !sel.ShowURL || !sel.NeedURL {
 		t.Fatalf("URL flags should be enabled for commit_url alias: %+v", sel)
 	}

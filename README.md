@@ -4,8 +4,7 @@
 [![Test](https://github.com/phyten/todox/actions/workflows/test.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/test.yml)
 [![Build](https://github.com/phyten/todox/actions/workflows/build.yml/badge.svg)](https://github.com/phyten/todox/actions/workflows/build.yml)
 
-`todox` scans your repository for uppercase **`TODO` / `FIXME`** markers and helps you
-identify **who introduced or last touched** those lines in seconds—either from the CLI or a lightweight web UI.
+`todox` scans your repository for **`TODO` / `FIXME`** markers (case-insensitive) and helps you identify **who introduced or last touched** those lines in seconds—either from the CLI or a lightweight web UI.
 
 - `--mode last` (default): show the **most recent author** of the line (`git blame`).
 - `--mode first`: show the **original author** who introduced the TODO/FIXME (`git log -L`).
@@ -174,6 +173,20 @@ make build
 - `-t, --type {todo|fixme|both}`: which markers to scan (default: both)
 - `-m, --mode {last|first}`: author definition (default: last)
 - `-a, --author REGEX`: filter by author name or email (extended regex)
+- `--detect {auto|parse|regex}`: choose between the parser-based engine, legacy regex scanning, or automatic fallback logic
+- `--detect-langs go,js,py,...`: restrict parser-based detection to the provided languages (CSV or repeated flags). When combined
+  with `--detect=parse`, files whose detected language is not in the list are skipped (no regex fallback). With
+  `--detect=auto`, excluded files fall back to the heuristic/plain-text scanner. Common shorthands such as `js`, `ts`, `py`,
+  `rb`, `sh`, `ps1`, and `c++` are normalized automatically.
+- `--tags TODO,FIXME,NOTE`: override the detection tag set (case-insensitive; CSV or repeated flags)
+- `--include-strings` / `--comments-only` / `--no-strings`: control whether string literals are scanned.
+  When multiple CLI flags are present, the **last one wins**. In config files and environment variables,
+  `comments_only` / `no_strings` override `include_strings` if both are provided. Web API query parameters
+  follow the same override rule as config/env (a later `comments_only` or `no_strings` value wins over
+  earlier `include_strings`).
+- `--max-file-bytes N`: fall back to the heuristic/plain-text scanner for files larger than `N` bytes (0 = unlimited). This
+  fallback applies even when `--detect=parse` is selected.
+- `--no-prefilter`: disable the default `git grep` prefilter before parser-based scanning
 
 ### Path filtering
 
@@ -218,17 +231,31 @@ todox --with-age --color always | less -R
 > When commit link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`. Enabling PR links populates `prs[]` alongside `has_prs`; every entry exposes `{number,state,url,title,body}` (the new fields are additive so older clients remain compatible). These fields are part of the public API surface and will remain stable.
 > Note that `has_url` / `has_prs` indicate that the data was collected (via `--with-*` or explicit `--fields` selections); a column may still be hidden depending on the renderer.
 
-`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/TSV/JSON outputs.
+`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/TSV/JSON outputs. When `--fields` is specified it replaces the default column list even if `--with-comment` / `--with-message` were set earlier—include `comment`/`message` explicitly in `--fields` when you still want them visible.
+
+For example:
+
+```bash
+# Ensure the comment column is still rendered after overriding --fields
+todox --with-comment --fields type,author,comment
+```
 
 Fields you can reference via `--fields` (table/TSV outputs):
-- `type`, `author`, `email`, `date`, `age`, `commit`, `location` (`file:line`)
+- `type`, `tag`, `kind`, `lang`
+- `author`, `email`, `date`, `age`, `commit`, `location` (`file:line`)
+- `text`, `span`
 - `comment`, `message`
-- `url` (alias: `commit_url`)
+- `url` (alias: `commit_url`; renders as `COMMIT_URL` to avoid a header clash)
 - `pr`, `prs`, `pr_urls`
+
+`type` reports the normalized tag (e.g. `TODO`, `FIXME`), while `tag` returns the canonical tag that was matched. Today both
+values are uppercased and therefore usually identical; future releases may surface the source text in `tag`. `kind` identifies
+the match source (`comment`, `string`, `heredoc`, …) and `lang` indicates the parser language. `span` prints
+`start_line:start_col-end_line:end_col` using 1-based coordinates; column offsets count bytes in the UTF-8 source.
 
 ### Extra columns (hidden by default)
 
-- `--with-comment`: include the TODO/FIXME line text
+- `--with-comment`: include the TODO/FIXME line text starting at the first matched tag
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
 - `--with-age`: append an AGE (days since author date) column to table/TSV outputs
@@ -305,7 +332,9 @@ Default for `jobs`: `min(runtime.NumCPU(), 64)` (number of CPU cores capped at 6
 
 - `--mode first` relies heavily on `git log -L`, which can be slow on very large repositories. A progress bar and ETA are displayed.
 - `git` must be available at runtime—even inside containers.
-- Only uppercase `TODO` / `FIXME` markers are detected.
+- `TODO` / `FIXME` detection is case-insensitive. Use `--tags` if you need to narrow the accepted marker set.
+- TSV/table headers render `commit_url` as `COMMIT_URL` to avoid a clash with the existing `URL` column in earlier releases.
+- `span` coordinates count bytes within each line. Grapheme-aware columns may surface in a future release.
 
 ---
 
