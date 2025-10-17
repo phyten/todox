@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/phyten/todox/internal/engine"
 	ghclient "github.com/phyten/todox/internal/host/github"
+	"github.com/phyten/todox/internal/output"
 	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
@@ -39,6 +41,21 @@ func mustReadWebTemplate() string {
 	return string(data)
 }
 
+func TestWriteJSONResultDisablesHTMLEscape(t *testing.T) {
+	res := &engine.Result{Items: []engine.Item{{Comment: "<tag>"}}}
+	var buf bytes.Buffer
+	if err := writeJSONResult(&buf, res); err != nil {
+		t.Fatalf("writeJSONResult failed: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "\\u003c") {
+		t.Fatalf("JSON output should not escape angle brackets: %s", got)
+	}
+	if !strings.Contains(got, "<tag>") {
+		t.Fatalf("JSON output missing raw angle brackets: %s", got)
+	}
+}
+
 func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -56,7 +73,7 @@ func TestPrintTSVは出力をフラッシュする(t *testing.T) {
 		Items:      []engine.Item{{Kind: "TODO", Author: "山田", Email: "yamada@example.com", Date: "2024-01-01", File: "main.go", Line: 42}},
 	}
 
-	sel, err := ResolveFields("", true, true, false, false, false)
+	sel, err := output.ResolveFields("", true, true, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -90,7 +107,7 @@ func TestPrintTSVはコメント改行を可視化して保持する(t *testing.
 		Items:      []engine.Item{{Kind: "TODO", Author: "佐藤", Email: "sato@example.com", Date: "2024-02-01", File: "util.go", Line: 10, Comment: "調査中\n要確認"}},
 	}
 
-	sel, err := ResolveFields("", true, false, false, false, false)
+	sel, err := output.ResolveFields("", true, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -139,7 +156,7 @@ func TestPrintTableは制御文字を無害化する(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", true, false, false, false, false)
+	sel, err := output.ResolveFields("", true, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -182,7 +199,7 @@ func TestPrintTSVはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true, false, false)
+	sel, err := output.ResolveFields("", false, false, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -223,7 +240,7 @@ func TestPrintTSVは常に非カラー(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false, false, false)
+	sel, err := output.ResolveFields("type,author", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -263,7 +280,7 @@ func TestPrintTableはAGE列を表示できる(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, true, false, false)
+	sel, err := output.ResolveFields("", false, false, true, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -306,7 +323,7 @@ func TestPrintTableは全角半角混在でも桁が揃う(t *testing.T) {
 		},
 	}
 
-	sel, err := ResolveFields("type,author,location", false, false, false, false, false)
+	sel, err := output.ResolveFields("type,author,location", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -377,7 +394,7 @@ func TestPrintTableはカラーを有効化するとANSIコードを含む(t *te
 		}},
 	}
 
-	sel, err := ResolveFields("", false, false, false, false, false)
+	sel, err := output.ResolveFields("", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -416,7 +433,7 @@ func TestTableColorNeverDisablesANSI(t *testing.T) {
 		}},
 	}
 
-	sel, err := ResolveFields("type,author", false, false, false, false, false)
+	sel, err := output.ResolveFields("type,author", false, false, false, false, false)
 	if err != nil {
 		t.Fatalf("ResolveFields failed: %v", err)
 	}
@@ -550,7 +567,7 @@ func (o *recordingObserver) DoneCalled() bool {
 
 func TestApplyLinkColumnAddsURL(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "docs/readme.md", Line: 7}}}
-	sel := FieldSelection{NeedURL: true, ShowURL: true}
+	sel := output.FieldSelection{NeedURL: true, ShowURL: true}
 	var cache remoteInfoCache
 	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", &cache, res, sel); err != nil {
 		t.Fatalf("applyLinkColumn failed: %v", err)
@@ -568,7 +585,7 @@ func TestApplyLinkColumnAddsURL(t *testing.T) {
 
 func TestApplyLinkColumnSetsHasURLWhenHidden(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "main.go", Line: 42}}}
-	sel := FieldSelection{NeedURL: true, ShowURL: false}
+	sel := output.FieldSelection{NeedURL: true, ShowURL: false}
 	var cache remoteInfoCache
 	if err := applyLinkColumn(context.Background(), stubRunner{}, ".", &cache, res, sel); err != nil {
 		t.Fatalf("applyLinkColumn failed: %v", err)
@@ -583,7 +600,7 @@ func TestApplyLinkColumnSetsHasURLWhenHidden(t *testing.T) {
 
 func TestApplyLinkColumnGracefullyHandlesErrors(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "deadbeef", File: "foo.go", Line: 12}}}
-	sel := FieldSelection{NeedURL: true, ShowURL: true}
+	sel := output.FieldSelection{NeedURL: true, ShowURL: true}
 	var cache remoteInfoCache
 	if err := applyLinkColumn(context.Background(), errorRunner{}, ".", &cache, res, sel); err != nil {
 		t.Fatalf("applyLinkColumn should not fail: %v", err)
@@ -607,7 +624,7 @@ func TestApplyLinkColumnGracefullyHandlesErrors(t *testing.T) {
 
 func TestApplyPRColumnsPopulatesPRs(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678"}, {Commit: "1234567890abcdef1234567890abcdef12345678"}}}
-	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	sel := output.FieldSelection{NeedPRs: true, ShowPRs: true}
 	opts := prOptions{State: "all", Limit: 1, Prefer: "open", Jobs: 4}
 	var cache remoteInfoCache
 	if err := applyPRColumns(context.Background(), prRunner{}, ".", &cache, res, sel, opts, nil); err != nil {
@@ -635,7 +652,7 @@ func TestApplyPRColumnsPopulatesPRs(t *testing.T) {
 
 func TestApplyPRColumnsRecordsErrors(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "cafebabecafebabecafebabecafebabecafebabe"}}}
-	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	sel := output.FieldSelection{NeedPRs: true, ShowPRs: true}
 	var cache remoteInfoCache
 	if err := applyPRColumns(context.Background(), errorRunner{}, ".", &cache, res, sel, prOptions{State: "all", Limit: 3, Prefer: "open", Jobs: 2}, nil); err != nil {
 		t.Fatalf("applyPRColumns should not return error: %v", err)
@@ -656,7 +673,7 @@ func TestApplyPRColumnsRecordsErrors(t *testing.T) {
 
 func TestApplyPRColumnsPublishesProgressSnapshots(t *testing.T) {
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678"}, {Commit: "1234567890abcdef1234567890abcdef12345678"}}}
-	sel := FieldSelection{NeedPRs: true, ShowPRs: true}
+	sel := output.FieldSelection{NeedPRs: true, ShowPRs: true}
 	opts := prOptions{State: "all", Limit: 2, Prefer: "open", Jobs: 2}
 	var cache remoteInfoCache
 	obs := &recordingObserver{}
@@ -685,7 +702,7 @@ func TestApplyPRColumnsPublishesProgressSnapshots(t *testing.T) {
 func TestRemoteDetectionSharedAcrossLinkAndPR(t *testing.T) {
 	runner := &countingRunner{}
 	res := &engine.Result{Items: []engine.Item{{Commit: "1234567890abcdef1234567890abcdef12345678", File: "main.go", Line: 5}}}
-	sel := FieldSelection{NeedURL: true, ShowURL: true, NeedPRs: true, ShowPRs: true}
+	sel := output.FieldSelection{NeedURL: true, ShowURL: true, NeedPRs: true, ShowPRs: true}
 	opts := prOptions{State: "all", Limit: 1, Prefer: "open", Jobs: 1}
 	var cache remoteInfoCache
 	ctx := context.Background()

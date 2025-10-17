@@ -304,8 +304,10 @@ func ParseIntInRange(raw, key string, min, max int) (int, error) {
 func NormalizeOutput(value string) (string, error) {
 	v := strings.ToLower(strings.TrimSpace(value))
 	switch v {
-	case "table", "tsv", "json":
+	case "table", "tsv", "json", "csv", "ndjson", "md":
 		return v, nil
+	case "markdown-table":
+		return "md", nil
 	}
 	return "", fmt.Errorf("invalid --output: %s", value)
 }

@@ -1,0 +1,5 @@
+TYPE,AUTHOR,EMAIL,LOCATION,COMMENT,MESSAGE
+TODO,Alice,alice@example.com,internal/app/main.go:42,"refactor parser, handle ""quotes""
+and commas","Add feature
+Second line"
+FIXME,Bob,bob@example.com,pkg/util/helpers.go:7,escape pipes | for markdown,Review <check>

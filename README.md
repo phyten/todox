@@ -11,7 +11,7 @@
 - Filtering options: `--author`, `--type {todo|fixme|both}`.
 - Extra columns: `--with-comment`, `--with-message`, `--with-age`, `--full` (shortcut for comment+message with truncation).
 - Length control: `--truncate`, `--truncate-comment`, `--truncate-message`.
-- Output formats: `table`, `tsv`, `json`.
+- Output formats: `table`, `tsv`, `json`, `csv`, `ndjson`, `md` (`markdown-table`).
 - Color-aware tables: `--color {auto|always|never}` with automatic detection of `NO_COLOR`, `CLICOLOR`, and friends.
 - Accessible label palette: TODO/FIXME colors adapt to light/dark terminal backgrounds for WCAG AA contrast.
 - Progress bar: one-line TTY updates with smoothed ETA/P90 bands (disable with `--no-progress`).
@@ -61,10 +61,16 @@ make build
 # Surface the stalest TODO/FIXME items first and display AGE in the output
 ./bin/todox --with-age --sort -age
 
-# Export as TSV or JSON
+# Export as TSV, JSON, CSV, NDJSON, or Markdown table
 ./bin/todox --output tsv  > todo.tsv
 ./bin/todox --output json > todo.json
+./bin/todox --output csv  > todo.csv
+./bin/todox --output ndjson | jq -c 'select(.kind == "TODO")'
+./bin/todox --full --output md > TODOS.md
 ```
+
+Markdown tables escape pipe characters as `\|` and translate embedded newlines to `<br>` so GitHub renders each cell correctly.
+CSV output follows RFC 4180 and always ends rows with CRLF (`\r\n`) so spreadsheet tools ingest the file without conversion.
 
 ### Web mode
 
@@ -197,8 +203,8 @@ make build
 
 ### Output selection
 
-- `-o, --output {table|tsv|json}`: choose the output format (default: table)
-- `--fields type,author,date,...`: choose the columns for table/TSV (comma separated; overrides `--with-*`)
+- `-o, --output {table|tsv|json|csv|ndjson|md}`: choose the output format (default: table)
+- `--fields type,author,date,...`: choose the columns for tabular outputs (table/tsv/csv/md; comma separated; overrides `--with-*`)
 - `--color {auto|always|never}`: control terminal coloring for the table output (default: auto)
 
 ### Color mode & environment variables
@@ -231,7 +237,7 @@ todox --with-age --color always | less -R
 > When commit link generation is enabled, each item exposes a `url` and the top-level result includes `has_url`. Enabling PR links populates `prs[]` alongside `has_prs`; every entry exposes `{number,state,url,title,body}` (the new fields are additive so older clients remain compatible). These fields are part of the public API surface and will remain stable.
 > Note that `has_url` / `has_prs` indicate that the data was collected (via `--with-*` or explicit `--fields` selections); a column may still be hidden depending on the renderer.
 
-`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/TSV/JSON outputs. When `--fields` is specified it replaces the default column list even if `--with-comment` / `--with-message` were set earlier—include `comment`/`message` explicitly in `--fields` when you still want them visible.
+`--fields` only affects rendering. Data acquisition still follows the `--with-*` flags as well as any explicit field names. For example, `--fields type,url` keeps `NeedURL=true` even without `--with-commit-link`, so the URL column renders correctly across table/tsv/csv/md/json outputs. When `--fields` is specified it replaces the default column list even if `--with-comment` / `--with-message` were set earlier—include `comment`/`message` explicitly in `--fields` when you still want them visible.
 
 For example:
 
@@ -240,7 +246,7 @@ For example:
 todox --with-comment --fields type,author,comment
 ```
 
-Fields you can reference via `--fields` (table/TSV outputs):
+Fields you can reference via `--fields` (tabular outputs: table/tsv/csv/md):
 - `type`, `tag`, `kind`, `lang`
 - `author`, `email`, `date`, `age`, `commit`, `location` (`file:line`)
 - `text`, `span`
@@ -258,7 +264,7 @@ the match source (`comment`, `string`, `heredoc`, …) and `lang` indicates the 
 - `--with-comment`: include the TODO/FIXME line text starting at the first matched tag
 - `--with-snippet`: alias of `--with-comment` (kept for backward compatibility)
 - `--with-message`: include the commit subject (first line)
-- `--with-age`: append an AGE (days since author date) column to table/TSV outputs
+- `--with-age`: append an AGE (days since author date) column to tabular outputs
 - `--with-commit-link`: include a URL column with GitHub blob links (uses the `origin` remote by default)
   - `--with-link` remains available as a deprecated alias for backward compatibility.
   - Suppress the deprecated-alias warning by setting `TODOX_NO_DEPRECATION_WARNINGS=1` (handy for CI pipelines).
@@ -316,7 +322,7 @@ Both the CLI flags and the `/api/scan` query parameters share the same normaliza
 | Boolean flags (`--with-comment`, `with_comment`, `--with-message`, `with_message`, `--with-commit-link`, `with_commit_link`, `--with-pr-links`, `with_pr_links`, `ignore_ws`, etc.; `--with-link` / `with_link` remain as deprecated aliases) | `1`, `true`, `yes`, `on` → `true`; `0`, `false`, `no`, `off` → `false` | Empty values mean "not specified". Any other literal returns an error. |
 | `--type`, `type` | `todo`, `fixme`, `both` | Unknown values are rejected. |
 | `--mode`, `mode` | `last`, `first` | Unknown values are rejected. |
-| `--output` | `table`, `tsv`, `json` | Unknown values are rejected (CLI only). |
+| `--output` | `table`, `tsv`, `json`, `csv`, `ndjson`, `md` (`markdown-table`) | Unknown values are rejected (CLI only). |
 | `--jobs`, `jobs` | Integers in `[1, 64]` | Values outside the range are rejected. |
 | `--path`, `path` | Pathspecs/globs, comma-separated or repeated | Values are trimmed. Empty entries are ignored. |
 | `--exclude`, `exclude` | Same as above | `:(exclude)` / `:!` prefixes are preserved; otherwise `:(glob,exclude)` is added internally. |

@@ -156,8 +156,26 @@ func TestParseScanArgsColorFlag(t *testing.T) {
 	}
 }
 func TestParseScanArgsRejectsInvalidOutput(t *testing.T) {
-	if _, err := parseScanArgs([]string{"--output", "csv"}, "en"); err == nil {
+	if _, err := parseScanArgs([]string{"--output", "xml"}, "en"); err == nil {
 		t.Fatal("expected error for invalid output value")
+	}
+}
+
+func TestParseScanArgsAcceptsNewOutputs(t *testing.T) {
+	cases := map[string]string{
+		"csv":            "csv",
+		"ndjson":         "ndjson",
+		"md":             "md",
+		"markdown-table": "md",
+	}
+	for input, want := range cases {
+		cfg, err := parseScanArgs([]string{"--output", input}, "en")
+		if err != nil {
+			t.Fatalf("parseScanArgs failed for %s: %v", input, err)
+		}
+		if cfg.output != want {
+			t.Fatalf("output mismatch for %s: got %s want %s", input, cfg.output, want)
+		}
 	}
 }
 
