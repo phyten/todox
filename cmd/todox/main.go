@@ -28,6 +28,7 @@ import (
 	"github.com/phyten/todox/internal/gitremote"
 	ghclient "github.com/phyten/todox/internal/host/github"
 	"github.com/phyten/todox/internal/link"
+	"github.com/phyten/todox/internal/output"
 	"github.com/phyten/todox/internal/progress"
 	"github.com/phyten/todox/internal/termcolor"
 	"github.com/phyten/todox/internal/textutil"
@@ -206,21 +207,21 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 	mode := fs.String("mode", defaultsEngine.Mode, "last|first")
 	detect := fs.String("detect", defaultsEngine.Detect, "detection engine: auto|parse|regex")
 	author := fs.String("author", defaultsEngine.Author, "filter by author name/email (regexp)")
-	output := fs.String("output", defaultsEngine.Output, "table|tsv|json")
+	outputFmt := fs.String("output", defaultsEngine.Output, "table|tsv|json|csv|ndjson|md")
 	colorMode := fs.String("color", defaultsEngine.Color, "color output for tables: auto|always|never")
 	withComment := fs.Bool("with-comment", defaultsEngine.WithComment, "show line text (from TODO/FIXME)")
 	withMessage := fs.Bool("with-message", defaultsEngine.WithMessage, "show commit subject (1st line)")
 	includeStrings := fs.Bool("include-strings", defaultsEngine.IncludeStrings, "include string literals in detection")
 	commentsOnly := fs.Bool("comments-only", !defaultsEngine.IncludeStrings, "alias of --no-strings")
 	noStrings := fs.Bool("no-strings", !defaultsEngine.IncludeStrings, "alias of --comments-only")
-	withAge := fs.Bool("with-age", defaultsUI.WithAge, "show AGE column (table/tsv)")
+	withAge := fs.Bool("with-age", defaultsUI.WithAge, "show AGE column in tabular outputs (table/tsv/csv/md)")
 	withCommitLink := fs.Bool("with-commit-link", defaultsUI.WithCommitLink, "show URL column (GitHub blob link)")
 	withLinkAlias := fs.Bool("with-link", false, "DEPRECATED: alias of --with-commit-link")
-	withPRLinks := fs.Bool("with-pr-links", defaultsUI.WithPRLinks, "include pull request links (table/tsv/JSON)")
+	withPRLinks := fs.Bool("with-pr-links", defaultsUI.WithPRLinks, "include pull request links (table/tsv/csv/md/json)")
 	prState := fs.String("pr-state", defaultsUI.PRState, "filter PRs by state: all|open|closed|merged")
 	prLimit := fs.Int("pr-limit", defaultsUI.PRLimit, "maximum PRs to include per item (1-20)")
 	prPrefer := fs.String("pr-prefer", defaultsUI.PRPrefer, "state preference when ordering PRs: open|merged|closed|none")
-	fields := fs.String("fields", defaultsUI.Fields, "comma-separated columns for table/tsv (overrides --with-*)")
+	fields := fs.String("fields", defaultsUI.Fields, "comma-separated columns for tabular outputs (table/tsv/csv/md; overrides --with-*)")
 	full := fs.Bool("full", false, "shortcut for --with-comment --with-message (with default truncate)")
 	withSnippet := fs.Bool("with-snippet", false, "alias of --with-comment")
 	truncAll := fs.Int("truncate", defaultsEngine.TruncAll, "truncate comment/message to N runes (0=unlimited)")
@@ -510,7 +511,7 @@ func parseScanArgs(args []string, envLang string) (scanConfig, error) {
 		flagEngine.Repo = &v
 	}
 	if flagWasSet["output"] {
-		v := *output
+		v := *outputFmt
 		flagEngine.Output = &v
 	}
 	if flagWasSet["color"] {
@@ -624,6 +625,13 @@ func guessRepoDir(args []string, envCfg config.Config) string {
 	return repo
 }
 
+func writeJSONResult(w io.Writer, res *engine.Result) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	return enc.Encode(res)
+}
+
 func findFlagValue(args []string, name string) (string, bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -662,7 +670,7 @@ func scanCmd(args []string) {
 		return
 	}
 
-	fieldSel, err := ResolveFields(cfg.fields, cfg.withComment, cfg.withMessage, cfg.withAge, cfg.withCommit, cfg.withPRs)
+	fieldSel, err := output.ResolveFields(cfg.fields, cfg.withComment, cfg.withMessage, cfg.withAge, cfg.withCommit, cfg.withPRs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -725,14 +733,24 @@ func scanCmd(args []string) {
 	switch strings.ToLower(cfg.output) {
 	case "json":
 		// NOTE: JSON は機械可読フォーマットのため常に非カラー。--color の指定は無視する。
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(res); err != nil {
+		if err := writeJSONResult(os.Stdout, res); err != nil {
+			log.Fatal(err)
+		}
+	case "csv":
+		if err := output.WriteCSV(os.Stdout, res.Items, fieldSel); err != nil {
 			log.Fatal(err)
 		}
 	case "tsv":
 		// NOTE: TSV もターミナル以外で扱われることが多いため常に非カラー。--color の指定は無視する。
 		printTSV(res, fieldSel)
+	case "ndjson":
+		if err := output.WriteNDJSON(os.Stdout, res.Items); err != nil {
+			log.Fatal(err)
+		}
+	case "md":
+		if err := output.WriteMarkdownTable(os.Stdout, res.Items, fieldSel); err != nil {
+			log.Fatal(err)
+		}
 	default: // table
 		envMap := toEnvMap(os.Environ())
 		profile := termcolor.DetectProfile(envMap)
@@ -790,9 +808,9 @@ Search & attribution:
       --no-prefilter            Disable git grep prefilter prior to parsing
 
 Output:
-  -o, --output {table|tsv|json}  Output format (default: table)
+  -o, --output {table|tsv|json|csv|ndjson|md}  Output format (default: table)
       --color {auto|always|never} Colorize table output (default: auto)
-      --fields LIST             Columns for table/TSV (comma-separated; overrides --with-*)
+      --fields LIST             Columns for tabular outputs (table/tsv/csv/md; comma-separated)
                                Available columns: type, tag, kind, lang, author, email,
                                date, age, commit, location, text, span, comment, message,
                                url/commit_url, pr/prs/pr_urls
@@ -805,7 +823,7 @@ Extra columns (hidden by default):
       --with-comment             Show COMMENT (line text trimmed to start at TODO/FIXME)
       --with-message             Show MESSAGE (commit subject = 1st line)
       --with-snippet             Alias of --with-comment (backward compatible)
-      --with-age                 Show AGE (days since author date) in table/TSV
+      --with-age                 Show AGE (days since author date) in tabular outputs
       --with-commit-link         Show URL column with GitHub blob links
       --with-link                Deprecated alias of --with-commit-link
       --with-pr-links            Include pull requests containing each commit
@@ -910,9 +928,9 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --no-prefilter            git grep による事前フィルタを無効化
 
 出力:
-  -o, --output {table|tsv|json}  出力形式（既定: table）
+  -o, --output {table|tsv|json|csv|ndjson|md}  出力形式（既定: table）
       --color {auto|always|never} 表形式に色付け（既定: auto）
-      --fields LIST             table/TSV の列を指定（カンマ区切り。--with-* より優先）
+      --fields LIST             表形式（table/tsv/csv/md）の列を指定（カンマ区切り。--with-* より優先）
                                指定可能な列: type, tag, kind, lang, author, email, date,
                                age, commit, location, text, span, comment, message,
                                url/commit_url, pr/prs/pr_urls
@@ -926,7 +944,7 @@ const helpJapanese = `todox — リポジトリ内の TODO / FIXME の「誰が�
       --with-comment             COMMENT（行テキスト。TODO/FIXME から表示）
       --with-message             MESSAGE（コミットメッセージの1行目）
       --with-snippet             --with-comment の別名（後方互換）
-      --with-age                 AGE（日数）列を table/TSV に追加
+      --with-age                 AGE（日数）列を表形式に追加
       --with-commit-link         URL 列を追加（コミット行リンク）
       --with-link                --with-commit-link の非推奨エイリアス
       --with-pr-links            コミットを含む PR 情報を追加
@@ -1007,7 +1025,7 @@ GitHub 連携コマンド:
 
 type scanInputs struct {
 	Options  engine.Options
-	FieldSel FieldSelection
+	FieldSel output.FieldSelection
 	SortSpec SortSpec
 	PRState  string
 	PRLimit  int
@@ -1120,7 +1138,7 @@ func prepareScanInputs(repoDir string, q url.Values) (scanInputs, error) {
 		sortParam = strings.TrimSpace(rawSort[len(rawSort)-1])
 	}
 
-	fieldSel, err := ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge, withCommit, withPRs)
+	fieldSel, err := output.ResolveFields(fieldsParam, options.WithComment, options.WithMessage, withAge, withCommit, withPRs)
 	if err != nil {
 		return scanInputs{}, err
 	}
@@ -1561,7 +1579,7 @@ func (c *remoteInfoCache) Get(ctx context.Context, runner execx.Runner, repoDir 
 	return c.info, c.err
 }
 
-func applyLinkColumn(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel FieldSelection) error {
+func applyLinkColumn(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel output.FieldSelection) error {
 	if res == nil {
 		return nil
 	}
@@ -1598,7 +1616,7 @@ func applyLinkColumn(ctx context.Context, runner execx.Runner, repoDir string, c
 	return nil
 }
 
-func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel FieldSelection, opts prOptions, obs progress.Observer) error {
+func applyPRColumns(ctx context.Context, runner execx.Runner, repoDir string, cache *remoteInfoCache, res *engine.Result, sel output.FieldSelection, opts prOptions, obs progress.Observer) error {
 	if res == nil {
 		return nil
 	}
@@ -1818,20 +1836,17 @@ func recordPRStageError(res *engine.Result, msg string) {
 	res.ErrorCount = len(res.Errors)
 }
 
-func printTSV(res *engine.Result, sel FieldSelection) {
+func printTSV(res *engine.Result, sel output.FieldSelection) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 0, '\t', 0) // tabs only
 	write := func(text string) {
 		mustFprintln(w, text)
 	}
-	headers := make([]string, len(sel.Fields))
-	for i, f := range sel.Fields {
-		headers[i] = f.Header
-	}
+	headers := output.Headers(sel.Fields)
 	write(strings.Join(headers, "\t"))
 	for _, it := range res.Items {
-		row := make([]string, len(sel.Fields))
-		for i, f := range sel.Fields {
-			row[i] = sanitizeField(formatFieldValue(it, f.Key))
+		row := output.RowValues(it, sel.Fields)
+		for i := range row {
+			row[i] = sanitizeField(row[i])
 		}
 		write(strings.Join(row, "\t"))
 	}
@@ -1847,7 +1862,7 @@ type tableColorConfig struct {
 	ageScale float64 // AGE グラデーションの正規化係数（p95 を基準、下限 120 日、データ無し時は 120）
 }
 
-func printTable(res *engine.Result, sel FieldSelection, colors tableColorConfig) {
+func printTable(res *engine.Result, sel output.FieldSelection, colors tableColorConfig) {
 	colCount := len(sel.Fields)
 	if colors.enabled && colors.scheme == termcolor.SchemeUnknown {
 		env := toEnvMap(os.Environ())
@@ -1865,7 +1880,7 @@ func printTable(res *engine.Result, sel FieldSelection, colors tableColorConfig)
 	for rowIdx, it := range res.Items {
 		row := make([]tableCell, colCount)
 		for colIdx, f := range sel.Fields {
-			val := sanitizeField(formatFieldValue(it, f.Key))
+			val := sanitizeField(output.FormatFieldValue(it, f.Key))
 			style := tableCellStyle(f.Key, it, colors)
 			row[colIdx] = tableCell{text: val, style: style}
 			if w := textutil.VisibleWidth(val); w > widths[colIdx] {

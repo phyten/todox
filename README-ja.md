@@ -15,7 +15,7 @@
 - フィルタ：`--author`, `--type {todo|fixme|both}`
 - 追加列：`--with-comment`（行本文を TODO/FIXME から表示）、`--with-message`（コミット件名 1 行目）、`--with-age`（AGE 列を追加）、`--full`
 - 表示幅制御：`--truncate`, `--truncate-comment`, `--truncate-message`
-- 出力：`table` / `tsv` / `json`
+- 出力：`table` / `tsv` / `json` / `csv` / `ndjson` / `md`（`markdown-table`）
 - 表の色付け：`--color {auto|always|never}`（`NO_COLOR` / `CLICOLOR` 等を自動検出）
 - TODO/FIXME ラベルの配色は端末の背景の明暗に追従し、WCAG AA 相当のコントラストを確保します。
 - 進捗表示：TTY のみ stderr に 1 行上書き、ETA/P90 を平滑化して表示（`--no-progress` あり）
@@ -63,10 +63,16 @@ make build
 # 最古の TODO/FIXME から順に表示し、AGE 列を追加
 ./bin/todox --with-age --sort -age
 
-# TSV / JSON で出力
+# TSV / JSON / CSV / NDJSON / Markdown 表で出力
 ./bin/todox --output tsv  > todo.tsv
 ./bin/todox --output json > todo.json
+./bin/todox --output csv  > todo.csv
+./bin/todox --output ndjson | jq -c 'select(.kind == "TODO")'
+./bin/todox --full --output md > TODOS.md
 ```
+
+Markdown 表ではセル内の `|` を `\|` にエスケープし、改行は `<br>` に置換して GitHub 互換の描画を維持します。
+CSV 出力は RFC 4180 に従い、各行を CRLF（`\r\n`）で終端するため、表計算ソフトにそのまま取り込めます。
 
 ### Web モード
 
@@ -199,8 +205,8 @@ make build
 
 ### 出力形式
 
-- `-o, --output {table|tsv|json}` : 出力フォーマット（既定: table）
-- `--fields type,author,date,...` : table/TSV の列順を指定（カンマ区切り。`--with-*` より優先）
+- `-o, --output {table|tsv|json|csv|ndjson|md}` : 出力フォーマット（既定: table）
+- `--fields type,author,date,...` : 表形式（table/tsv/csv/md）の列順を指定（カンマ区切り。`--with-*` より優先）
 - `--color {auto|always|never}` : 表形式に色付けするモード（既定: auto）
 
 ### 色付けと環境変数
@@ -233,7 +239,7 @@ todox --with-age --color always | less -R
 > `--with-commit-link` を有効にすると各 item に `url`、Result に `has_url` が追加されます。`--with-pr-links` を有効にすると各 item に `prs[]`、Result に `has_prs` が追加されます（エントリは `{number,state,url,title,body}` を含みます。新フィールドは追加のみなので既存クライアントとの後方互換性は保たれます）。これらは公開 API の一部であり将来も保持されます。
 > `has_url` / `has_prs` は「データ取得済みか」の指標です（`--with-*` や `--fields` により内部取得されます）。列を非表示にしていてもメタ情報としては true になります。
 
-`--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/TSV/JSON で表示されます）。`--fields` を指定すると既定の列リストはすべて置き換わるため、`--with-comment` や `--with-message` を併用する場合でも `comment` / `message` を `--fields` に含める必要があります。
+`--fields` は「表示する列」のみを制御します。`--with-*` フラグや明示的に指定した列名に応じて内部取得は継続されます（例: `--fields type,url` だけを指定しても URL データは取得され、table/tsv/csv/md/json で表示されます）。`--fields` を指定すると既定の列リストはすべて置き換わるため、`--with-comment` や `--with-message` を併用する場合でも `comment` / `message` を `--fields` に含める必要があります。
 
 例:
 
@@ -242,7 +248,7 @@ todox --with-age --color always | less -R
 todox --with-comment --fields type,author,comment
 ```
 
-`--fields` で指定できる列（table / TSV）:
+`--fields` で指定できる列（表形式: table/tsv/csv/md）:
 - `type`, `tag`, `kind`, `lang`
 - `author`, `email`, `date`, `age`, `commit`, `location`（`file:line`）
 - `text`, `span`
@@ -260,7 +266,7 @@ todox --with-comment --fields type,author,comment
 - `--with-comment` : TODO/FIXME 行を最初に一致したタグ位置から表示
 - `--with-snippet` : `--with-comment` のエイリアス（後方互換用途）
 - `--with-message` : コミットサマリ（1 行目）を表示
-- `--with-age` : table / TSV に AGE（日数）列を追加
+- `--with-age` : 表形式に AGE（日数）列を追加
 - `--with-commit-link` : URL 列を追加（GitHub 上の該当行リンク。既定では `origin` リモートを参照）
   - `--with-link` は後方互換のための非推奨エイリアスとして残しています。
   - CI 等で非推奨警告を抑止したい場合は `TODOX_NO_DEPRECATION_WARNINGS=1` を設定してください。
@@ -318,7 +324,7 @@ CLI フラグと `/api/scan` のクエリパラメータは共通の正規化レ
 | 真偽値フラグ（`--with-comment`、`with_comment`、`--with-message`、`with_message`、`--with-commit-link`、`with_commit_link`、`--with-pr-links`、`with_pr_links`、`ignore_ws` など。`--with-link` / `with_link` は非推奨エイリアス） | `1` / `true` / `yes` / `on` → true、`0` / `false` / `no` / `off` → false | 空文字は「未指定」扱い。それ以外の文字列はエラーになります。 |
 | `--type`, `type` | `todo` / `fixme` / `both` | 未知の値はエラーになります。 |
 | `--mode`, `mode` | `last` / `first` | 未知の値はエラーになります。 |
-| `--output` | `table` / `tsv` / `json` | 未知の値はエラーになります（CLI のみ）。 |
+| `--output` | `table` / `tsv` / `json` / `csv` / `ndjson` / `md`（`markdown-table`） | 未知の値はエラーになります（CLI のみ）。 |
 | `--jobs`, `jobs` | 1〜64 の整数 | 範囲外はエラーになります。 |
 | `--path`, `path` | pathspec / glob（カンマ区切り・繰り返し可） | 前後の空白は除去。空要素は無視します。 |
 | `--exclude`, `exclude` | 同上 | `:(exclude)` や `:!` で始まる場合はそのまま尊重し、そうでなければ内部的に `:(glob,exclude)` を付与します。 |
