@@ -50,25 +50,27 @@ make build
 
 ### 例
 
+> ソースからビルドして PATH に追加していない場合は、以下のコマンドを `./bin/` から実行してください。
+
 ```bash
 # すべての TODO/FIXME の最終変更者（表形式）
-./bin/todox
+todox
 
 # FIXME だけ、初回導入者、行本文＋件名を 80 文字にトリム
-./bin/todox --type fixme --mode first --full --truncate 80
+todox --type fixme --mode first --full --truncate 80
 
 # 作者名/メールで絞り込み（正規表現）
-./bin/todox -a 'Alice|alice@example.com'
+todox -a 'Alice|alice@example.com'
 
 # 最古の TODO/FIXME から順に表示し、AGE 列を追加
-./bin/todox --with-age --sort -age
+todox --with-age --sort -age
 
 # TSV / JSON / CSV / NDJSON / Markdown 表で出力
-./bin/todox --output tsv  > todo.tsv
-./bin/todox --output json > todo.json
-./bin/todox --output csv  > todo.csv
-./bin/todox --output ndjson | jq -c 'select(.kind == "TODO")'
-./bin/todox --full --output md > TODOS.md
+todox --output tsv  > todo.tsv
+todox --output json > todo.json
+todox --output csv  > todo.csv
+todox --output ndjson | jq -c 'select(.kind == "TODO")'
+todox --full --output md > TODOS.md
 ```
 
 Markdown 表ではセル内の `|` を `\|` にエスケープし、改行は `<br>` に置換して GitHub 互換の描画を維持します。
@@ -77,7 +79,7 @@ CSV 出力は RFC 4180 に従い、各行を CRLF（`\r\n`）で終端するた�
 ### Web モード
 
 ```bash
-./bin/todox serve -p 8080
+todox serve -p 8080
 # -> http://localhost:8080 （API: /api/scan）
 ```
 
@@ -307,7 +309,7 @@ todox --with-comment --fields type,author,comment
 - `--lang {en|ja}` : 現在の実行に使うヘルプ言語を指定
 - `GTA_LANG=ja`（環境変数）: 既定ヘルプ言語を日本語に変更（`GIT_TODO_AUTHORS_LANG` も使用可）
 
-ヘルプ：`./bin/todox -h`（英語/日本語の両対応、例付き）
+ヘルプ：`./bin/todox -h`（グローバルにインストール済みなら `todox -h` でも可、英語/日本語の両対応・例付き）
 
 ### GitHub 連携コマンド
 

@@ -48,25 +48,27 @@ make build
 
 ### Examples
 
+> If you built from source without installing globally, prefix the commands below with `./bin/`.
+
 ```bash
 # List TODO/FIXME items with the most recent author (table output)
-./bin/todox
+todox
 
 # Focus on FIXMEs, show the original author, truncate comment + subject to 80 characters
-./bin/todox --type fixme --mode first --full --truncate 80
+todox --type fixme --mode first --full --truncate 80
 
 # Filter by author name or email (regular expression)
-./bin/todox -a 'Alice|alice@example.com'
+todox -a 'Alice|alice@example.com'
 
 # Surface the stalest TODO/FIXME items first and display AGE in the output
-./bin/todox --with-age --sort -age
+todox --with-age --sort -age
 
 # Export as TSV, JSON, CSV, NDJSON, or Markdown table
-./bin/todox --output tsv  > todo.tsv
-./bin/todox --output json > todo.json
-./bin/todox --output csv  > todo.csv
-./bin/todox --output ndjson | jq -c 'select(.kind == "TODO")'
-./bin/todox --full --output md > TODOS.md
+todox --output tsv  > todo.tsv
+todox --output json > todo.json
+todox --output csv  > todo.csv
+todox --output ndjson | jq -c 'select(.kind == "TODO")'
+todox --full --output md > TODOS.md
 ```
 
 Markdown tables escape pipe characters as `\|` and translate embedded newlines to `<br>` so GitHub renders each cell correctly.
@@ -75,7 +77,7 @@ CSV output follows RFC 4180 and always ends rows with CRLF (`\r\n`) so spreadshe
 ### Web mode
 
 ```bash
-./bin/todox serve -p 8080
+todox serve -p 8080
 # -> http://localhost:8080 (JSON API: /api/scan)
 ```
 
@@ -305,7 +307,7 @@ Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining
 - `--lang {en|ja}`: set the help language for the current invocation
 - `GTA_LANG=ja` (environment): default to Japanese help (`GIT_TODO_AUTHORS_LANG` also works)
 
-Full help: `./bin/todox -h` (bilingual output and examples).
+Full help: `./bin/todox -h` (or `todox -h` if installed globally; bilingual output and examples).
 
 ### GitHub helpers
 
