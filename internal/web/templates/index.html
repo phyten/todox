@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,879 +7,303 @@
   <link rel="stylesheet" href="{{.StylesPath}}">
 </head>
 <body>
-  <h2>todox</h2>
-  <div id="error-banner" class="error-banner" role="alert" aria-live="assertive">
-    <span id="error-message"></span>
-    <button type="button" id="error-close" aria-label="Close">&times;</button>
+  <div class="app-shell">
+    <aside class="options-panel" id="options-panel" data-open>
+      <div class="panel-header">
+        <h1>todox</h1>
+        <button type="button" class="panel-close" id="panel-close" aria-label="オプションを閉じる">×</button>
+      </div>
+      <div class="panel-body">
+        <div class="preset-chips" role="group" aria-label="プリセット">
+          <span class="preset-title">プリセット</span>
+          <div class="chip-wrap" id="preset-chips">
+            <button type="button" class="chip" data-preset="precise">Precise</button>
+            <button type="button" class="chip" data-preset="fast">Fast</button>
+            <button type="button" class="chip" data-preset="oldest">Oldest first</button>
+            <button type="button" class="chip" data-preset="prs">PR重視</button>
+            <button type="button" class="chip" data-preset="concise">短く見やすく</button>
+            <button type="button" class="chip" data-preset="whitespace">Whitespace厳密</button>
+            <button type="button" class="chip" data-preset="baseline">デフォルトに戻す</button>
+          </div>
+        </div>
+        <form id="opts" class="options-form">
+          <fieldset class="section">
+            <legend>基本 <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              よく使う検索条件です。タグ種類、 blame の基準、著者フィルタ、ソート順を指定できます。
+            </div>
+            <div class="field-grid">
+              <label for="type">マーカー種別
+                <select id="type" name="type">
+                  <option value="both">TODO と FIXME</option>
+                  <option value="todo">TODO のみ</option>
+                  <option value="fixme">FIXME のみ</option>
+                </select>
+              </label>
+              <label for="mode">著者の定義
+                <select id="mode" name="mode">
+                  <option value="last">最終コミット (last)</option>
+                  <option value="first">初回コミット (first)</option>
+                </select>
+              </label>
+              <label for="author">著者フィルタ（拡張正規表現）
+                <input id="author" name="author" type="text" placeholder="Alice|alice@example.com">
+              </label>
+              <label for="sort-quick">並び替え（簡易）
+                <select id="sort-quick">
+                  <option value="">(変更しない)</option>
+                  <option value="-age">古い順 (-age)</option>
+                  <option value="age">新しい順 (age)</option>
+                  <option value="author">著者 (author)</option>
+                  <option value="file">ファイル (file)</option>
+                </select>
+              </label>
+              <label for="sort">並び替え（詳細ビルダー）
+                <input id="sort" name="sort" type="text" placeholder="-age,file">
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>検出エンジン <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              解析方式や対象言語を制御します。コメント／文字列の扱いもここで切り替えます。
+            </div>
+            <div class="field-grid">
+              <div class="control">
+                <span class="control-label">文字列走査</span>
+                <div class="segmented" role="radiogroup" aria-label="文字列走査">
+                  <input type="radio" id="scan-comments" name="string_scan" value="comments_only" checked>
+                  <label for="scan-comments">コメントのみ</label>
+                  <input type="radio" id="scan-mixed" name="string_scan" value="include_strings">
+                  <label for="scan-mixed">コメント＋文字列</label>
+                  <input type="radio" id="scan-none" name="string_scan" value="no_strings">
+                  <label for="scan-none">文字列なし</label>
+                </div>
+              </div>
+              <label for="detect">検出エンジン
+                <select id="detect" name="detect">
+                  <option value="auto">auto (自動)</option>
+                  <option value="parse">parse</option>
+                  <option value="regex">regex</option>
+                </select>
+              </label>
+              <label for="detect_langs">対象言語（CSV／スペース区切り）
+                <input id="detect_langs" name="detect_langs" type="text" data-tokenize placeholder="go,js,ts,py">
+              </label>
+              <label for="tags">タグ上書き（CSV）
+                <input id="tags" name="tags" type="text" placeholder="TODO,FIXME,NOTE">
+              </label>
+              <label for="max_file_bytes">最大ファイルサイズ（バイト）
+                <input id="max_file_bytes" name="max_file_bytes" type="number" min="0" step="1" placeholder="0">
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="no_prefilter" name="no_prefilter" value="1">
+                git grep プリフィルタを無効化
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>パス・除外 <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              スキャン対象／除外パスを細かく指定できます。改行またはカンマで複数入力できます。
+            </div>
+            <div class="field-grid">
+              <label for="path">対象パス
+                <textarea id="path" name="path" rows="2" data-multi placeholder="cmd,internal"></textarea>
+              </label>
+              <label for="exclude">除外パス
+                <textarea id="exclude" name="exclude" rows="2" data-multi placeholder="vendor/**,node_modules/**"></textarea>
+              </label>
+              <label for="path_regex">パス正規表現
+                <textarea id="path_regex" name="path_regex" rows="2" data-multi placeholder=".*\\.go$"></textarea>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="exclude_typical" name="exclude_typical" value="1">
+                定番ディレクトリを除外
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>列と付加情報 <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              表示列と、追加のメタデータ取得を制御します。`fields` に URL／PR 列を含めると自動的に対応フラグが有効になります。
+            </div>
+            <div class="field-grid">
+              <label for="fields">表示列（Ctrl/Cmd + クリックで複数選択）
+                <select id="fields" name="fields" multiple size="8">
+                  <option value="type">type</option>
+                  <option value="tag">tag</option>
+                  <option value="kind">kind</option>
+                  <option value="lang">lang</option>
+                  <option value="author">author</option>
+                  <option value="email">email</option>
+                  <option value="date">date</option>
+                  <option value="age">age</option>
+                  <option value="commit">commit</option>
+                  <option value="location">location</option>
+                  <option value="text">text</option>
+                  <option value="span">span</option>
+                  <option value="comment">comment</option>
+                  <option value="message">message</option>
+                  <option value="url">url</option>
+                  <option value="commit_url">commit_url</option>
+                  <option value="pr">pr</option>
+                  <option value="prs">prs</option>
+                  <option value="pr_urls">pr_urls</option>
+                </select>
+              </label>
+              <div class="checkbox-group">
+                <label class="checkbox"><input type="checkbox" name="with_comment" value="1"> コメント列</label>
+                <label class="checkbox"><input type="checkbox" name="with_message" value="1"> コミットメッセージ</label>
+                <label class="checkbox"><input type="checkbox" name="with_age" value="1"> 経過日数</label>
+                <label class="checkbox"><input type="checkbox" name="with_commit_link" value="1"> コミットURL</label>
+                <label class="checkbox"><input type="checkbox" id="with_pr_links" name="with_pr_links" value="1"> PRリンク</label>
+              </div>
+              <p class="inline-note" id="field-auto-note" hidden>URL/PR列を選択したため必要なフラグを自動で有効化しました。</p>
+              <div id="pr-options" class="pr-options" hidden>
+                <label for="pr_state">PR state
+                  <select id="pr_state" name="pr_state">
+                    <option value="">(既定)</option>
+                    <option value="open">open</option>
+                    <option value="merged">merged</option>
+                    <option value="closed">closed</option>
+                    <option value="all">all</option>
+                  </select>
+                </label>
+                <label for="pr_limit">PR limit
+                  <input id="pr_limit" name="pr_limit" type="number" min="1" max="20" value="3">
+                </label>
+                <label for="pr_prefer">PR prefer
+                  <select id="pr_prefer" name="pr_prefer">
+                    <option value="">(指定なし)</option>
+                    <option value="open">open</option>
+                    <option value="merged">merged</option>
+                    <option value="closed">closed</option>
+                    <option value="none">none</option>
+                  </select>
+                </label>
+                <p class="inline-note">GitHub 認証が必要な場合は `gh auth login` または `GITHUB_TOKEN` を設定してください。</p>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>表示長の制御 <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              COMMENT／MESSAGE の表示幅を調整します。0 で無制限です。
+            </div>
+            <div class="range-grid">
+              <div class="range-pair" data-target="truncate">
+                <label for="truncate">全体トランケート (truncate)</label>
+                <input type="range" id="truncate-range" min="0" max="240" step="10">
+                <input type="number" id="truncate" name="truncate" min="0" step="1" placeholder="120">
+              </div>
+              <div class="range-pair" data-target="truncate_comment">
+                <label for="truncate_comment">コメント幅 (truncate_comment)</label>
+                <input type="range" id="truncate_comment-range" min="0" max="240" step="10">
+                <input type="number" id="truncate_comment" name="truncate_comment" min="0" step="1">
+              </div>
+              <div class="range-pair" data-target="truncate_message">
+                <label for="truncate_message">メッセージ幅 (truncate_message)</label>
+                <input type="range" id="truncate_message-range" min="0" max="240" step="10">
+                <input type="number" id="truncate_message" name="truncate_message" min="0" step="1">
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="section">
+            <legend>実行・パフォーマンス <button type="button" class="help-toggle" aria-expanded="false">?</button></legend>
+            <div class="help-text" hidden>
+              リポジトリや空白差分、並列度などの実行条件を設定します。
+            </div>
+            <div class="field-grid">
+              <label for="repo">リポジトリパス
+                <input id="repo" name="repo" type="text" placeholder=".">
+              </label>
+              <label for="ignore_ws">空白差分の扱い
+                <select id="ignore_ws" name="ignore_ws">
+                  <option value="1">空白のみの変更を無視 (既定)</option>
+                  <option value="0">空白のみの変更も最新扱い</option>
+                </select>
+              </label>
+              <label for="jobs">jobs (1–64、空欄=自動)
+                <input id="jobs" name="jobs" type="number" min="1" max="64" step="1" placeholder="">
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="form-actions">
+            <button type="submit" class="primary">スキャン</button>
+            <button type="button" id="cancel-scan">キャンセル</button>
+            <button type="button" id="reset-form">リセット</button>
+          </div>
+        </form>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="main-header">
+        <button type="button" class="panel-open" id="panel-open">⚙️ オプション</button>
+        <div class="share-box">
+          <div class="share-line">
+            <label for="cli-command">CLI 等価コマンド</label>
+            <textarea id="cli-command" class="share-text" rows="1" readonly spellcheck="false"></textarea>
+            <button type="button" class="copy-btn" data-copy-target="#cli-command">コピー</button>
+          </div>
+          <div class="share-line">
+            <label for="share-url">共有URL</label>
+            <input id="share-url" class="share-text" type="text" readonly spellcheck="false">
+            <button type="button" class="copy-btn" data-copy-target="#share-url">コピー</button>
+          </div>
+        </div>
+      </header>
+
+      <div id="error-banner" class="error-banner" role="alert" aria-live="assertive">
+        <span id="error-message"></span>
+        <button type="button" id="error-close" aria-label="閉じる">×</button>
+      </div>
+
+      <section id="progress" class="progress-wrap" aria-live="polite" hidden>
+        <div class="progress-header">
+          <div class="progress-heading">
+            <strong id="progress-stage">scan</strong>
+            <span id="progress-stats" class="muted"></span>
+          </div>
+          <button type="button" id="progress-cancel" class="linklike">キャンセル</button>
+        </div>
+        <ol class="stepper" aria-label="Stages">
+          <li id="st-scan" class="current">scan</li>
+          <li id="st-attr">attr</li>
+          <li id="st-pr">pr</li>
+        </ol>
+        <div id="progressbar" class="progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Stage progress">
+          <div id="progressbar-inner" style="width:0%"></div>
+        </div>
+        <div class="progress-footer muted">
+          <span id="progress-eta">ETA: —</span>
+          <span id="progress-rate">Rate: —</span>
+          <span id="progress-elapsed">Elapsed: —</span>
+        </div>
+      </section>
+
+      <section class="result-controls">
+        <div class="result-info">
+          <span id="result-count">結果: 0 件</span>
+          <span id="result-errors" class="muted" hidden></span>
+        </div>
+        <div class="result-actions">
+          <button type="button" id="export-json" disabled>JSON を保存</button>
+          <button type="button" id="export-tsv" disabled>TSV を保存</button>
+        </div>
+      </section>
+
+      <div id="result-table" class="result-table"></div>
+    </main>
   </div>
-  <form id="f">
-    <label>type:
-      <select name="type">
-        <option>both</option>
-        <option>todo</option>
-        <option>fixme</option>
-      </select>
-    </label>
-    <label>mode:
-      <select name="mode">
-        <option>last</option>
-        <option>first</option>
-      </select>
-    </label>
-    <label>author (regexp): <input name="author" type="text"></label>
-    <label>path (CSV ok): <input name="path" type="text" placeholder="src,pkg"></label>
-    <label>exclude (CSV ok): <input name="exclude" type="text" placeholder="vendor/**"></label>
-    <label>path regex: <input name="path_regex" type="text" placeholder="\\.go$"></label>
-    <label><input type="checkbox" name="with_comment"> comment</label>
-    <label><input type="checkbox" name="with_message"> message</label>
-    <label><input type="checkbox" name="with_commit_link"> commit link</label>
-    <label><input type="checkbox" name="with_pr_links"> PR links</label>
-    <label>PR state:
-      <select name="pr_state">
-        <option value="all">all</option>
-        <option value="open">open</option>
-        <option value="merged">merged</option>
-        <option value="closed">closed</option>
-      </select>
-    </label>
-    <label>PR prefer:
-      <select name="pr_prefer">
-        <option value="open">open</option>
-        <option value="merged">merged</option>
-        <option value="closed">closed</option>
-        <option value="none">none</option>
-      </select>
-    </label>
-    <label>PR limit: <input type="number" name="pr_limit" min="1" max="20" value="3" inputmode="numeric" pattern="[0-9]*"></label>
-    <label><input type="checkbox" name="ignore_ws" checked> ignore whitespace</label>
-    <label><input type="checkbox" name="exclude_typical"> exclude typical dirs</label>
-    <label>jobs: <input type="number" name="jobs" min="1" max="64" inputmode="numeric" pattern="[0-9]*" placeholder="auto"></label>
-    <label>truncate: <input type="text" name="truncate" value="120"></label>
-    <button type="submit">Scan</button>
-  </form>
-  <p class="small">Tip: Same params as CLI. Example: <code>/api/scan?type=todo&amp;mode=first&amp;with_comment=1</code></p>
-  <div id="progress" class="progress-wrap" aria-live="polite" hidden>
-    <div class="progress-header">
-      <strong id="progress-stage">scan</strong>
-      <span id="progress-stats" class="muted"></span>
-      <button type="button" id="progress-cancel" class="linklike">キャンセル</button>
-    </div>
 
-    <ol class="stepper" aria-label="Stages">
-      <li id="st-scan" class="current">scan</li>
-      <li id="st-attr">attr</li>
-      <li id="st-pr">pr</li>
-    </ol>
-
-    <div id="progressbar" class="progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Stage progress">
-      <div id="progressbar-inner" style="width:0%"></div>
-    </div>
-
-    <div class="progress-footer muted">
-      <span id="progress-eta">ETA: —</span>
-      <span id="progress-rate">Rate: —</span>
-      <span id="progress-elapsed">Elapsed: —</span>
-    </div>
-  </div>
-  <div id="out"></div>
-  <script>
-  const f=document.getElementById('f');
-  const out=document.getElementById('out');
-  const banner=document.getElementById('error-banner');
-  const bannerMsg=document.getElementById('error-message');
-  const bannerClose=document.getElementById('error-close');
-  const prog=document.getElementById('progress');
-  const progInner=document.getElementById('progressbar-inner');
-  const progBar=document.getElementById('progressbar');
-  const progStage=document.getElementById('progress-stage');
-  const progStats=document.getElementById('progress-stats');
-  const progETA=document.getElementById('progress-eta');
-  const progRate=document.getElementById('progress-rate');
-  const progElapsed=document.getElementById('progress-elapsed');
-  const btnCancel=document.getElementById('progress-cancel');
-  const stScan=document.getElementById('st-scan');
-  const stAttr=document.getElementById('st-attr');
-  const stPr=document.getElementById('st-pr');
-
-  let es=null;
-  let lastSnap=null;
-  let rafId=0;
-  let fetchAbort=null; // AbortController | null
-  let latestResult=null;
-  let tableRows=[];
-  let sortKey=null;
-  let sortDesc=false;
-
-  function showError(msg){
-    bannerMsg.textContent=msg;
-    banner.style.display='flex';
-  }
-
-  function hideError(){
-    banner.style.display='none';
-    bannerMsg.textContent='';
-  }
-
-  function escText(value){
-    return String(value||'')
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;');
-  }
-
-  function escAttr(value){
-    return String(value||'')
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;')
-      .replace(/'/g,'&#39;');
-  }
-
-  function collapseWhitespace(value){
-    return String(value||'').replace(/\s+/g,' ').trim();
-  }
-
-  function ellipsize(text,max){
-    const raw=String(text||'');
-    if(!max||max<=0||raw.length<=max){
-      return raw;
-    }
-    if(max<=1){
-      return raw.slice(0,max);
-    }
-    return raw.slice(0,max-1)+'…';
-  }
-
-  function normalizePRTooltip(body){
-    const collapsed=String(body||'')
-      .replace(/\r?\n/g,' ')
-      .replace(/\\[rn]/g,' ')
-      .replace(/\s+/g,' ')
-      .trim();
-    if(!collapsed){
-      return '';
-    }
-    return ellipsize(collapsed,280);
-  }
-
-  function renderBadge(kind){
-    const raw=String(kind||'');
-    if(!raw){
-      return '';
-    }
-    const upper=raw.toUpperCase();
-    let dataType='OTHER';
-    if(upper==='TODO' || upper==='FIXME'){
-      dataType=upper;
-    }
-    return '<span class="badge" data-type="'+dataType+'">'+escText(upper)+'</span>';
-  }
-
-  function renderResultTable(data,opts){
-    const info=(data&&typeof data==='object')?data:{};
-    const options=opts||{};
-    const rowsSource=options.rows;
-    const rows=Array.isArray(rowsSource)?rowsSource:(Array.isArray(info.items)?info.items:[]);
-    const errs=Array.isArray(info.errors)?info.errors:[];
-    const parts=[];
-    if(errs.length>0){
-      let list='<ul>';
-      for(const e of errs){
-        const fileRaw=e&&e.file?e.file:'(unknown)';
-        const lineRaw=e&&typeof e.line==='number'&&e.line>0?String(e.line):'—';
-        const loc=fileRaw+':'+lineRaw;
-        const stage=e&&e.stage?e.stage:'git';
-        list+='<li><code>'+escText(loc)+'</code> ['+escText(stage)+'] '+escText(e&&e.message?e.message:'')+'</li>';
-      }
-      list+='</ul>';
-      parts.push('<div class="errors"><strong>'+errs.length+' error(s)</strong>'+list+'</div>');
-    }
-    if(!rows || rows.length===0){
-      parts.push('<p>No results.</p>');
-      return parts.join('');
-    }
-    const headerMeta=buildHeaderMeta(info);
-    const activeKey=options.sortKey?String(options.sortKey):null;
-    const activeDesc=!!options.sortDesc;
-    const head=headerMeta.map(meta=>{
-      const classes=['sort-btn'];
-      if(activeKey===meta.key){
-        classes.push(activeDesc?'desc':'asc');
-      }
-      const ariaSort=activeKey===meta.key?(activeDesc?'descending':'ascending'):'none';
-      return '<th aria-sort="'+ariaSort+'"><button type="button" class="'+classes.join(' ')+'" data-key="'+escAttr(meta.key)+'">'+escText(meta.label)+'</button></th>';
-    }).join('');
-    let tableHTML='<table><thead><tr>'+head+'</tr></thead><tbody>';
-    for(const r of rows){
-      const cells=[];
-      for(const meta of headerMeta){
-        cells.push('<td>'+renderTableCell(meta.key,r,info)+'</td>');
-      }
-      tableHTML+='<tr>'+cells.join('')+'</tr>';
-    }
-    tableHTML+='</tbody></table>';
-    parts.push(tableHTML);
-    return parts.join('');
-  }
-
-  function buildHeaderMeta(info){
-    const meta=[
-      {key:'kind',label:'TYPE'},
-      {key:'author',label:'AUTHOR'},
-      {key:'email',label:'EMAIL'},
-      {key:'date',label:'DATE'}
-    ];
-    if(info&&info.has_age){
-      meta.push({key:'age_days',label:'AGE'});
-    }
-    meta.push({key:'commit',label:'COMMIT'});
-    meta.push({key:'location',label:'LOCATION'});
-    if(info&&info.has_url){
-      meta.push({key:'url',label:'URL'});
-    }
-    if(info&&info.has_prs){
-      meta.push({key:'prs',label:'PRS'});
-    }
-    if(info&&info.has_comment){
-      meta.push({key:'comment',label:'COMMENT'});
-    }
-    if(info&&info.has_message){
-      meta.push({key:'message',label:'MESSAGE'});
-    }
-    return meta;
-  }
-
-  function renderTableCell(key,row){
-    const r=row||{};
-    switch(key){
-      case 'kind':
-        return renderBadge(r.kind);
-      case 'author':
-        return escText(r.author);
-      case 'email':
-        return escText(r.email);
-      case 'date':
-        return escText(r.date);
-      case 'age_days':{
-        const ageRaw=(typeof r.age_days==='number'&&isFinite(r.age_days))?String(r.age_days):(r.age_days===0?'0':'');
-        return escText(ageRaw);
-      }
-      case 'commit':{
-        const commitRaw=r.commit?String(r.commit).slice(0,8):'';
-        return '<code>'+escText(commitRaw)+'</code>';
-      }
-      case 'location':{
-        const fileRaw=r.file?String(r.file):'';
-        const lineRaw=(typeof r.line==='number'&&r.line>0)?String(r.line):'';
-        return '<code>'+escText(fileRaw+':'+lineRaw)+'</code>';
-      }
-      case 'url':{
-        const urlRaw=r.url?String(r.url):'';
-        if(!urlRaw){
-          return '';
-        }
-        const href=escAttr(urlRaw);
-        return '<a class="link-icon" href="'+href+'" target="_blank" rel="noopener noreferrer" aria-label="GitHub で開く"><span aria-hidden="true">🔗</span></a>';
-      }
-      case 'prs':
-        return renderPRCell(r.prs);
-      case 'comment':
-        return escText(r.comment);
-      case 'message':
-        return escText(r.message);
-      default:
-        return escText(r[key]);
-    }
-  }
-
-  function renderPRCell(value){
-    const list=Array.isArray(value)?value:[];
-    if(!list.length){
-      return '';
-    }
-    const entries=[];
-    for(const pr of list){
-      const info=pr||{};
-      const numValue=typeof info.number==='number'?info.number:Number(info.number);
-      const hasNumber=Number.isFinite(numValue)&&numValue>0;
-      const numberText=hasNumber?String(Math.trunc(numValue)):'';
-      const stateRaw=info.state!=null?String(info.state):'';
-      const state=stateRaw.trim().toLowerCase()||'unknown';
-      const titleRaw=info.title!=null?String(info.title):'';
-      const titleText=titleRaw.trim();
-      const tooltip=normalizePRTooltip(info.body);
-      const anchorLabel=hasNumber?'#'+numberText:(titleText||state||'#');
-      const ariaParts=[];
-      if(hasNumber){
-        ariaParts.push('PR #'+numberText);
-      }else{
-        ariaParts.push('Pull request');
-        if(titleText){
-          ariaParts.push(titleText);
-        }
-      }
-      if(state){
-        ariaParts.push(state);
-      }
-      const ariaLabel=ariaParts.join(' ').trim();
-      let leading=escText(anchorLabel);
-      if(info.url){
-        const attrs=['href="'+escAttr(String(info.url))+'"','target="_blank"','rel="noopener noreferrer"'];
-        if(ariaLabel){
-          attrs.push('aria-label="'+escAttr(ariaLabel)+'"');
-        }
-        if(tooltip){
-          attrs.push('title="'+escAttr(tooltip)+'"');
-        }
-        leading='<a '+attrs.join(' ')+'>'+escText(anchorLabel)+'</a>';
-      }else if(tooltip){
-        leading='<span title="'+escAttr(tooltip)+'">'+leading+'</span>';
-      }
-      let titleSuffix='';
-      if(hasNumber && titleText){
-        titleSuffix=' '+escText(titleText);
-      }else if(!hasNumber && titleText && anchorLabel!==titleText){
-        titleSuffix=' '+escText(titleText);
-      }
-      entries.push(leading+titleSuffix+' ('+escText(state)+')');
-    }
-    return entries.join('; ');
-  }
-
-  function sortRows(rows,key,desc){
-    const base=Array.isArray(rows)?rows.slice():[];
-    if(!key){
-      return base;
-    }
-    base.sort((left,right)=>{
-      const leftEmpty=isValueEmptyForKey(left,key);
-      const rightEmpty=isValueEmptyForKey(right,key);
-      if(leftEmpty!==rightEmpty){
-        return leftEmpty?1:-1;
-      }
-      const cmp=compareRows(left,right,key);
-      return desc?-cmp:cmp;
-    });
-    return base;
-  }
-
-  function isValueEmptyForKey(row,key){
-    const r=row||{};
-    switch(key){
-      case 'age_days':
-        return !(typeof r.age_days==='number' && isFinite(r.age_days));
-      case 'commit':
-      case 'date':
-      case 'author':
-      case 'email':
-      case 'kind':
-      case 'comment':
-      case 'message':
-      case 'url':{
-        const val=r[key];
-        return val==null || String(val).trim()==='';
-      }
-      case 'location':{
-        const file=r.file!=null?String(r.file).trim():'';
-        const hasLine=typeof r.line==='number' && r.line>0;
-        return !file && !hasLine;
-      }
-      case 'prs':
-        return !(Array.isArray(r.prs) && r.prs.length>0);
-      default:{
-        const val=r[key];
-        return val==null || String(val).trim()==='';
-      }
-    }
-  }
-
-  function compareRows(a,b,key){
-    switch(key){
-      case 'age_days':
-        return compareNumbers(a&&a.age_days,b&&b.age_days);
-      case 'commit':
-        return compareStrings(a&&a.commit,b&&b.commit);
-      case 'date':
-        return compareStrings(a&&a.date,b&&b.date);
-      case 'author':
-        return compareStrings(a&&a.author,b&&b.author);
-      case 'email':
-        return compareStrings(a&&a.email,b&&b.email);
-      case 'kind':
-        return compareStrings(a&&a.kind,b&&b.kind);
-      case 'comment':
-        return compareStrings(a&&a.comment,b&&b.comment);
-      case 'message':
-        return compareStrings(a&&a.message,b&&b.message);
-      case 'url':
-        return compareStrings(a&&a.url,b&&b.url);
-      case 'location':
-        return compareLocation(a,b);
-      case 'prs':
-        return comparePRs(a,b);
-      default:
-        return compareStrings(a&&a[key],b&&b[key]);
-    }
-  }
-
-  function compareStrings(a,b){
-    const sa=a==null?'':String(a).trim();
-    const sb=b==null?'':String(b).trim();
-    const emptyA=sa==='';
-    const emptyB=sb==='';
-    if(emptyA && emptyB){
-      return 0;
-    }
-    if(emptyA){
-      return 1;
-    }
-    if(emptyB){
-      return -1;
-    }
-    if(sa<sb){return -1;}
-    if(sa>sb){return 1;}
-    return 0;
-  }
-
-  function compareNumbers(a,b){
-    const validA=typeof a==='number' && isFinite(a);
-    const validB=typeof b==='number' && isFinite(b);
-    if(!validA && !validB){
-      return 0;
-    }
-    if(!validA){
-      return 1;
-    }
-    if(!validB){
-      return -1;
-    }
-    if(a<b){return -1;}
-    if(a>b){return 1;}
-    return 0;
-  }
-
-  function compareLocation(a,b){
-    const fileA=a&&a.file!=null?String(a.file).trim():'';
-    const fileB=b&&b.file!=null?String(b.file).trim():'';
-    const rawLineA=a&&typeof a.line==='number'&&a.line>0?a.line:NaN;
-    const rawLineB=b&&typeof b.line==='number'&&b.line>0?b.line:NaN;
-    const missingA=!fileA && !Number.isFinite(rawLineA);
-    const missingB=!fileB && !Number.isFinite(rawLineB);
-    if(missingA && missingB){
-      return 0;
-    }
-    if(missingA){
-      return 1;
-    }
-    if(missingB){
-      return -1;
-    }
-    if(fileA<fileB){return -1;}
-    if(fileA>fileB){return 1;}
-    const validA=Number.isFinite(rawLineA);
-    const validB=Number.isFinite(rawLineB);
-    if(!validA && !validB){
-      return 0;
-    }
-    if(!validA){
-      return 1;
-    }
-    if(!validB){
-      return -1;
-    }
-    if(rawLineA<rawLineB){return -1;}
-    if(rawLineA>rawLineB){return 1;}
-    return 0;
-  }
-
-  function comparePRs(a,b){
-    const listA=Array.isArray(a&&a.prs)?a.prs:[];
-    const listB=Array.isArray(b&&b.prs)?b.prs:[];
-    if(listA.length===0 && listB.length===0){
-      return 0;
-    }
-    if(listA.length===0){
-      return 1;
-    }
-    if(listB.length===0){
-      return -1;
-    }
-    const firstA=listA[0]||{};
-    const firstB=listB[0]||{};
-    const numA=typeof firstA.number==='number'?firstA.number:Number(firstA.number);
-    const numB=typeof firstB.number==='number'?firstB.number:Number(firstB.number);
-    const hasNumA=Number.isFinite(numA)&&numA>0;
-    const hasNumB=Number.isFinite(numB)&&numB>0;
-    if(hasNumA && hasNumB){
-      if(numA<numB){return -1;}
-      if(numA>numB){return 1;}
-      return 0;
-    }
-    if(hasNumA){
-      return -1;
-    }
-    if(hasNumB){
-      return 1;
-    }
-    const titleCmp=compareStrings(firstA.title,firstB.title);
-    if(titleCmp!==0){
-      return titleCmp;
-    }
-    return compareStrings(firstA.state,firstB.state);
-  }
-
-  function resetProgressUI(){
-    progStage.textContent='scan';
-    progStats.textContent='0/— done';
-    progETA.textContent='ETA: —';
-    progRate.textContent='Rate: —';
-    progElapsed.textContent='Elapsed: —';
-    updateProgressBar(0,false);
-    setStepper('scan');
-  }
-
-  function showProgressUI(){
-    prog.hidden=false;
-    resetProgressUI();
-    prog.setAttribute('aria-busy','true');
-  }
-
-  function hideProgressUI(){
-    prog.hidden=true;
-    prog.removeAttribute('aria-busy');
-    lastSnap=null;
-    if(rafId && typeof cancelAnimationFrame==='function'){
-      cancelAnimationFrame(rafId);
-      rafId=0;
-    }
-    btnCancel.onclick=null;
-  }
-
-  function setStepper(stage){
-    const stages={scan:stScan,attr:stAttr,pr:stPr};
-    for(const key of Object.keys(stages)){
-      const el=stages[key];
-      if(!el){continue;}
-      el.classList.remove('current');
-      el.classList.remove('done');
-    }
-    if(stage==='scan'){
-      stScan.classList.add('current');
-    }else if(stage==='attr'){
-      stScan.classList.add('done');
-      stAttr.classList.add('current');
-    }else if(stage==='pr'){
-      stScan.classList.add('done');
-      stAttr.classList.add('done');
-      stPr.classList.add('current');
-    }
-  }
-
-  function togglePRStepVisibility(enabled){
-    if(!stPr){return;}
-    stPr.style.display = enabled ? '' : 'none';
-  }
-
-  function updateProgressBar(percent,determinate){
-    const pct=Math.max(0,Math.min(100,percent||0));
-    progInner.style.width=pct+'%';
-    if(progBar){
-      if(determinate){
-        progBar.setAttribute('aria-valuenow',String(Math.round(pct)));
-        progBar.removeAttribute('aria-valuetext');
-      }else{
-        progBar.removeAttribute('aria-valuenow');
-        progBar.setAttribute('aria-valuetext','in progress');
-      }
-    }
-  }
-
-  function renderProgressOnce(){
-    rafId=0;
-    if(!lastSnap){
-      return;
-    }
-    const s=lastSnap;
-    const nf = (typeof Intl!=='undefined'&&Intl.NumberFormat)?new Intl.NumberFormat():{format:(v)=>String(v)};
-    progStage.textContent=s.stage||'';
-    setStepper(s.stage);
-    const determinate=!!(s.total&&s.total>0);
-    let percent=0;
-    if(determinate){
-      percent=(s.done/s.total)*100;
-    }
-    updateProgressBar(percent,determinate);
-    const totalLabel=determinate?nf.format(s.total):'—';
-    const statText=nf.format(s.done||0)+'/'+totalLabel+' done';
-    const rateLabel=typeof s.rate_per_sec==='number'&&isFinite(s.rate_per_sec)?nf.format(Number(s.rate_per_sec.toFixed(1)))+'/sec':'—';
-    function fmtEta(sec){
-      if(!(typeof sec==='number'&&isFinite(sec))){return '—';}
-      const mm=Math.floor(sec/60);
-      const ss=Math.round(sec%60);
-      return nf.format(Number(sec.toFixed(1)))+'s ('+mm+':'+String(ss).padStart(2,'0')+')';
-    }
-    const etaLabel=fmtEta(s.eta_sec_p50);
-    const elapsedLabel=typeof s.elapsed_sec==='number'&&isFinite(s.elapsed_sec)?s.elapsed_sec.toFixed(1)+'s':'—';
-    progStats.textContent=statText;
-    progRate.textContent='Rate: '+rateLabel;
-    progETA.textContent='ETA: '+etaLabel;
-    progElapsed.textContent='Elapsed: '+elapsedLabel;
-  }
-
-  function scheduleRender(){
-    if(typeof requestAnimationFrame!=='function'){
-      renderProgressOnce();
-      return;
-    }
-    if(rafId){
-      return;
-    }
-    rafId=requestAnimationFrame(renderProgressOnce);
-  }
-
-  function closeStream(){
-    if(es){
-      try{es.close();}catch(_){ }
-      es=null;
-    }
-  }
-
-  function renderTableWithSort(){
-    const base=(latestResult&&typeof latestResult==='object')?latestResult:{};
-    const sorted=sortRows(tableRows,sortKey,sortDesc);
-    out.innerHTML=renderResultTable(base,{rows:sorted,sortKey:sortKey,sortDesc:sortDesc});
-    attachSortHandlers();
-  }
-
-  function attachSortHandlers(){
-    const buttons=out.querySelectorAll('th .sort-btn');
-    for(const btn of buttons){
-      btn.addEventListener('click',(ev)=>{
-        ev.preventDefault();
-        const key=btn.getAttribute('data-key');
-        if(!key){
-          return;
-        }
-        if(sortKey===key){
-          sortDesc=!sortDesc;
-        }else{
-          sortKey=key;
-          sortDesc=false;
-        }
-        renderTableWithSort();
-      });
-    }
-  }
-
-  function updateResultData(data){
-    latestResult=(data&&typeof data==='object')?data:null;
-    tableRows=Array.isArray(latestResult&&latestResult.items)?latestResult.items.slice():[];
-    sortKey=null;
-    sortDesc=false;
-    renderTableWithSort();
-  }
-
-  async function startScanWithFetch(q){
-    hideProgressUI();
-    out.innerHTML='';
-    latestResult=null;
-    tableRows=[];
-    sortKey=null;
-    sortDesc=false;
-    // フォールバック実行中のキャンセル対応
-    fetchAbort = new AbortController();
-    const { signal } = fetchAbort;
-    try{
-      const res=await fetch('/api/scan?'+q.toString(), { signal });
-      const raw=await res.text();
-      if(!res.ok){
-        let msg='HTTP '+res.status;
-        if(res.statusText){
-          msg+=' '+res.statusText;
-        }
-        const trimmed=raw.trim();
-        if(trimmed){
-          msg+=': '+trimmed;
-        }
-        throw new Error(msg);
-      }
-      let data=null;
-      const trimmed=raw.trim();
-      if(trimmed!==''){
-        try{
-          data=JSON.parse(trimmed);
-        }catch(parseErr){
-          const detail=parseErr instanceof Error?parseErr.message:String(parseErr);
-          throw new Error('Failed to parse response JSON: '+detail);
-        }
-      }
-      updateResultData(data);
-    }catch(err){
-      if(err && err.name === 'AbortError'){
-        // キャンセル時は静かに終了
-        return;
-      }
-      console.error(err);
-      showError(err instanceof Error?err.message:String(err));
-    } finally {
-      fetchAbort = null;
-    }
-  }
-
-  function startScanWithSSE(q){
-    closeStream();
-    out.innerHTML='';
-    latestResult=null;
-    tableRows=[];
-    sortKey=null;
-    sortDesc=false;
-    showProgressUI();
-    try{
-      es=new EventSource('/api/scan/stream?'+q.toString());
-    }catch(err){
-      hideProgressUI();
-      showError(err instanceof Error?err.message:String(err));
-      return;
-    }
-
-    es.addEventListener('progress',(ev)=>{
-      try{
-        lastSnap=JSON.parse(ev.data);
-        scheduleRender();
-      }catch(parseErr){
-        console.warn('progress parse failed',parseErr);
-      }
-    });
-
-    es.addEventListener('result',(ev)=>{
-      try{
-        const res=JSON.parse(ev.data);
-        hideProgressUI();
-        updateResultData(res);
-      }catch(parseErr){
-        console.error(parseErr);
-        showError(parseErr instanceof Error?parseErr.message:String(parseErr));
-      }finally{
-        closeStream();
-      }
-    });
-
-    function handleServerError(ev){
-      if(!ev || typeof ev.data==='undefined'){
-        return;
-      }
-      try{
-        const payload=JSON.parse(ev.data||'{}');
-        showError(payload&&payload.message?payload.message:'stream error');
-      }catch(parseErr){
-        showError(parseErr instanceof Error?parseErr.message:String(parseErr));
-      }
-      hideProgressUI();
-      closeStream();
-    }
-    es.addEventListener('error', handleServerError);
-    es.addEventListener('server_error', handleServerError);
-
-    es.onerror=(ev)=>{
-      if(ev && typeof ev.data!=='undefined'){
-        return;
-      }
-      if(!es){
-        return;
-      }
-      const label=(lastSnap&&es.readyState===EventSource.CONNECTING)?'reconnecting…':'connecting…';
-      progStats.textContent=label;
-    };
-
-    btnCancel.onclick=()=>{
-      closeStream();
-      if(fetchAbort){
-        try{ fetchAbort.abort(); }catch(_){ }
-        fetchAbort=null;
-      }
-      hideProgressUI();
-    };
-  }
-
-  function buildQueryParams(){
-    const fd=new FormData(f);
-    const q=new URLSearchParams(fd);
-    const ignoreEl=f.elements.namedItem('ignore_ws');
-    if(ignoreEl instanceof HTMLInputElement){
-      if(ignoreEl.checked){
-        q.delete('ignore_ws');
-      }else{
-        q.set('ignore_ws','0');
-      }
-    }
-    for(const key of ['path','exclude','path_regex']){
-      const values=q.getAll(key);
-      q.delete(key);
-      const cleaned=[];
-      for(const value of values){
-        if(value==null){
-          continue;
-        }
-        for(const piece of String(value).split(',')){
-          const trimmed=piece.trim();
-          if(trimmed){
-            cleaned.push(trimmed);
-          }
-        }
-      }
-      for(const entry of cleaned){
-        q.append(key,entry);
-      }
-    }
-    const excludeTypical=f.elements.namedItem('exclude_typical');
-    if(excludeTypical instanceof HTMLInputElement){
-      if(excludeTypical.checked){
-        q.set('exclude_typical','1');
-      }else{
-        q.delete('exclude_typical');
-      }
-    }
-    const jobsEl=f.elements.namedItem('jobs');
-    if(jobsEl instanceof HTMLInputElement){
-      if((jobsEl.value||'').trim()===''){
-        q.delete('jobs');
-      }
-    }
-    return q;
-  }
-
-  bannerClose.addEventListener('click',(e)=>{
-    e.preventDefault();
-    hideError();
-  });
-
-  // PR ステップの動的表示（初期化）
-  (function(){
-    const prCheck=f.elements.namedItem('with_pr_links');
-    if(prCheck instanceof HTMLInputElement){
-      togglePRStepVisibility(prCheck.checked);
-      prCheck.addEventListener('change',()=>togglePRStepVisibility(prCheck.checked));
-    }
-  })();
-
-  f.addEventListener('submit',(e)=>{
-    e.preventDefault();
-    hideError();
-    const q=buildQueryParams();
-    // 送信直前にも反映
-    {
-      const prCheck=f.elements.namedItem('with_pr_links');
-      if(prCheck instanceof HTMLInputElement){
-        togglePRStepVisibility(prCheck.checked);
-      }
-    }
-    if('EventSource' in window){
-      startScanWithSSE(q);
-    }else{
-      startScanWithFetch(q);
-    }
-  });
-  </script>
+  <script src="{{.ScriptPath}}" defer></script>
 </body>
 </html>
