@@ -26,17 +26,17 @@ import (
 	"github.com/phyten/todox/internal/textutil"
 )
 
-var webTemplateHTML = mustReadWebTemplate()
+var webUIScript = mustReadWebUIScript()
 
-func mustReadWebTemplate() string {
+func mustReadWebUIScript() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("runtime.Caller failed")
 	}
-	path := filepath.Join(filepath.Dir(file), "..", "..", "internal", "web", "templates", "index.html")
+	path := filepath.Join(filepath.Dir(file), "..", "..", "internal", "web", "assets", "ui.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		panic(fmt.Sprintf("failed to load web template: %v", err))
+		panic(fmt.Sprintf("failed to load web ui script: %v", err))
 	}
 	return string(data)
 }
@@ -780,7 +780,7 @@ func TestApplySortは年齢順に並び替える(t *testing.T) {
 
 func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
@@ -806,14 +806,14 @@ func TestWebRenderOmitsURLColumnWhenFlagDisabled(t *testing.T) {
 	if !strings.Contains(yesHTML, ">URL</button>") {
 		t.Fatalf("URL ヘッダーのボタンラベルが欠落しています: %s", yesHTML)
 	}
-	if !strings.Contains(yesHTML, "aria-label=\"GitHub で開く\"") {
+	if !strings.Contains(yesHTML, "aria-label=\"GitHubで開く\"") {
 		t.Fatalf("アクセシブルラベルが不足しています: %s", yesHTML)
 	}
 }
 
 func TestWebRenderIncludesPRColumn(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
@@ -841,7 +841,7 @@ func TestWebRenderIncludesPRColumn(t *testing.T) {
 
 func TestWebRenderAppliesAriaSortAttributes(t *testing.T) {
 	rt := goja.New()
-	for _, fn := range []string{"escText", "escAttr", "renderBadge", "collapseWhitespace", "ellipsize", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
+	for _, fn := range []string{"escText", "escAttr", "renderBadge", "normalizePRTooltip", "renderPRCell", "buildHeaderMeta", "renderTableCell", "renderResultTable"} {
 		if _, err := rt.RunString(extractJSFunction(t, fn)); err != nil {
 			t.Fatalf("failed to load %s: %v", fn, err)
 		}
@@ -967,23 +967,143 @@ func TestReportErrorsは標準エラーに概要を出力する(t *testing.T) {
 }
 
 func extractJSFunction(t *testing.T, name string) string {
+	t.Helper()
+
+	src := webUIScript
 	marker := "function " + name + "("
-	idx := strings.Index(webTemplateHTML, marker)
-	if idx < 0 {
+	start := strings.Index(src, marker)
+	if start < 0 {
 		t.Fatalf("function %s not found", name)
 	}
-	rest := webTemplateHTML[idx:]
-	end := len(rest)
-	candidates := []string{"\n  function ", "\nfunction ", "\n  </script>", "\n</script>"}
-	for _, c := range candidates {
-		if next := strings.Index(rest, c); next >= 0 && next < end {
-			end = next
+
+	openIdx := strings.Index(src[start:], "{")
+	if openIdx < 0 {
+		t.Fatalf("function %s opening brace not found", name)
+	}
+
+	i := start + openIdx
+	depth := 0
+	inSingle := false
+	inDouble := false
+	inBacktick := false
+	inLineComment := false
+	inBlockComment := false
+	inRegex := false
+	regexCharClass := false
+	regexEscaped := false
+	escaped := false
+
+	for ; i < len(src); i++ {
+		ch := src[i]
+
+		if inRegex {
+			if regexEscaped {
+				regexEscaped = false
+				continue
+			}
+			if ch == '\\' {
+				regexEscaped = true
+				continue
+			}
+			if regexCharClass {
+				if ch == ']' {
+					regexCharClass = false
+				}
+				continue
+			}
+			if ch == '[' {
+				regexCharClass = true
+				continue
+			}
+			if ch == '/' {
+				inRegex = false
+			}
+			continue
+		}
+
+		if inLineComment {
+			if ch == '\n' {
+				inLineComment = false
+			}
+			continue
+		}
+		if inBlockComment {
+			if ch == '*' && i+1 < len(src) && src[i+1] == '/' {
+				inBlockComment = false
+				i++
+			}
+			continue
+		}
+
+		if inSingle || inDouble || inBacktick {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			switch {
+			case inSingle && ch == '\'':
+				inSingle = false
+			case inDouble && ch == '"':
+				inDouble = false
+			case inBacktick && ch == '`':
+				inBacktick = false
+			}
+			continue
+		}
+
+		if ch == '/' && i+1 < len(src) {
+			next := src[i+1]
+			if next == '/' {
+				inLineComment = true
+				i++
+				continue
+			}
+			if next == '*' {
+				inBlockComment = true
+				i++
+				continue
+			}
+
+			prev := byte(0)
+			for j := i - 1; j >= start; j-- {
+				cj := src[j]
+				if cj == ' ' || cj == '\t' || cj == '\n' || cj == '\r' {
+					continue
+				}
+				prev = cj
+				break
+			}
+			if prev == 0 || strings.ContainsRune("=([{!,?:;+-*%&|^<>~", rune(prev)) {
+				inRegex = true
+				regexCharClass = false
+				regexEscaped = false
+				continue
+			}
+		}
+
+		switch ch {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '`':
+			inBacktick = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return src[start : i+1]
+			}
 		}
 	}
-	if end == len(rest) {
-		t.Fatalf("could not determine end of function %s", name)
-	}
-	return rest[:end]
+
+	t.Fatalf("function %s closing brace not found", name)
+	return ""
 }
 
 func TestAPIScanHandlerは不正なtruncateで400を返す(t *testing.T) {
