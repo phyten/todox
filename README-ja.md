@@ -45,10 +45,12 @@ brew install todox
 ```bash
 go mod tidy
 make build
-todox -h
+./bin/todox -h
 ```
 
 ### 例
+
+> ソースからビルドして PATH に追加していない場合は、以下のコマンドを `./bin/` から実行してください。
 
 ```bash
 # すべての TODO/FIXME の最終変更者（表形式）
@@ -307,7 +309,7 @@ todox --with-comment --fields type,author,comment
 - `--lang {en|ja}` : 現在の実行に使うヘルプ言語を指定
 - `GTA_LANG=ja`（環境変数）: 既定ヘルプ言語を日本語に変更（`GIT_TODO_AUTHORS_LANG` も使用可）
 
-ヘルプ：`todox -h`（英語/日本語の両対応、例付き）
+ヘルプ：`./bin/todox -h`（グローバルにインストール済みなら `todox -h` でも可、英語/日本語の両対応・例付き）
 
 ### GitHub 連携コマンド
 

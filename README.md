@@ -43,10 +43,12 @@ brew install todox
 ```bash
 go mod tidy
 make build
-todox -h
+./bin/todox -h
 ```
 
 ### Examples
+
+> If you built from source without installing globally, prefix the commands below with `./bin/`.
 
 ```bash
 # List TODO/FIXME items with the most recent author (table output)
@@ -305,7 +307,7 @@ Display widths follow Unicode wcwidth rules: grapheme clusters (emoji, combining
 - `--lang {en|ja}`: set the help language for the current invocation
 - `GTA_LANG=ja` (environment): default to Japanese help (`GIT_TODO_AUTHORS_LANG` also works)
 
-Full help: `todox -h` (bilingual output and examples).
+Full help: `./bin/todox -h` (or `todox -h` if installed globally; bilingual output and examples).
 
 ### GitHub helpers
 
